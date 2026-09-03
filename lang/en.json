@@ -28,6 +28,7 @@
   "CR.Builder.LayerName": "Layer {number}",
   "CR.Builder.LayerNamePrompt": "Layer name",
   "CR.Builder.LayerRequired": "Add or select a layer first.",
+  "CR.Builder.LayerRequiredForPaste": "Add a page or layer and select it before pasting an image.",
   "CR.Builder.Layers": "Layers",
   "CR.Builder.NoRegions": "No reveal areas yet.",
   "CR.Builder.OutputFolder": "Output folder",

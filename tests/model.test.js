@@ -12,7 +12,7 @@ import {
   retreatPresentation,
   startPresentation
 } from "../scripts/model.js";
-import { normalizeProject, simplifyPoints } from "../scripts/comic-builder.js";
+import { normalizeProject, reorderLayers, simplifyPoints } from "../scripts/comic-builder.js";
 
 const comic = {
   id: "comic-1",
@@ -137,4 +137,11 @@ test("sound effects stay aligned with naturally sorted frame images", () => {
   assert.equal(getCurrentImage(state, soundComic), "2.webp");
   assert.equal(getCurrentSound(state, soundComic), "two.ogg");
   assert.deepEqual(getUpcomingSounds({ ...state, stepIndex: 0 }, soundComic), ["two.ogg", "ten.ogg"]);
+});
+
+test("layers can be reordered by drag target identifiers", () => {
+  const layers = [{ id: "base" }, { id: "effects" }, { id: "text" }];
+  assert.equal(reorderLayers(layers, "text", "base"), true);
+  assert.deepEqual(layers.map((layer) => layer.id), ["text", "base", "effects"]);
+  assert.equal(reorderLayers(layers, "missing", "base"), false);
 });

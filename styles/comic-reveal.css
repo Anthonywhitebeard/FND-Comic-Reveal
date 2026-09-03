@@ -334,11 +334,22 @@
   padding: 0.25rem;
   border: 1px solid transparent;
   border-radius: 0.35rem;
+  cursor: grab;
+  transition: border-color 100ms ease, opacity 100ms ease, transform 100ms ease;
 }
 
 .cr-builder-layer.is-active {
   border-color: #c69cff;
   background: rgb(198 156 255 / 11%);
+}
+
+.cr-builder-layer.is-dragging {
+  opacity: 0.35;
+}
+
+.cr-builder-layer.is-drop-target {
+  border-color: #ffcf56;
+  transform: translateY(2px);
 }
 
 .cr-builder-layer > button:first-child {

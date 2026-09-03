@@ -40,6 +40,7 @@ function createBuilderState(onExport) {
     imageCache: new Map(),
     dirty: false,
     exporting: false,
+    draggedLayerId: null,
     onExport
   };
 }
@@ -101,6 +102,10 @@ function createBuilderElement() {
 
 function bindBuilder(state) {
   state.root.addEventListener("click", (event) => onBuilderClick(state, event));
+  state.root.addEventListener("dragstart", (event) => onLayerDragStart(state, event));
+  state.root.addEventListener("dragover", (event) => onLayerDragOver(state, event));
+  state.root.addEventListener("drop", (event) => onLayerDrop(state, event));
+  state.root.addEventListener("dragend", () => clearLayerDragState(state));
   state.root.querySelector("[name='projectTitle']").addEventListener("input", (event) => {
     state.project.title = event.target.value;
     state.dirty = true;
@@ -248,8 +253,8 @@ function chooseLayerImage(state) {
   openPicker("image", layer.source, async (path) => assignLayerImage(state, layer, path));
 }
 
-async function assignLayerImage(state, layer, path) {
-  if (layer.source && layer.source !== path && layer.regions.length) {
+async function assignLayerImage(state, layer, path, { confirmReplace = true } = {}) {
+  if (confirmReplace && layer.source && layer.source !== path) {
     const confirmed = window.confirm(game.i18n.localize("CR.Builder.ReplaceLayerConfirm"));
     if (!confirmed) return;
   }
@@ -367,6 +372,53 @@ function activePage(state) {
 
 function activeLayer(state) {
   return activePage(state)?.layers.find((layer) => layer.id === state.activeLayerId) ?? null;
+}
+
+function onLayerDragStart(state, event) {
+  const item = event.target.closest?.("[data-layer-id]");
+  if (!item) return;
+  state.draggedLayerId = item.dataset.layerId;
+  item.classList.add("is-dragging");
+  event.dataTransfer.effectAllowed = "move";
+  event.dataTransfer.setData("text/plain", state.draggedLayerId);
+}
+
+function onLayerDragOver(state, event) {
+  if (!state.draggedLayerId) return;
+  const item = event.target.closest?.("[data-layer-id]");
+  if (!item || item.dataset.layerId === state.draggedLayerId) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "move";
+  for (const element of state.root.querySelectorAll(".cr-builder-layer.is-drop-target")) element.classList.remove("is-drop-target");
+  item.classList.add("is-drop-target");
+}
+
+function onLayerDrop(state, event) {
+  const targetId = event.target.closest?.("[data-layer-id]")?.dataset.layerId;
+  const sourceId = state.draggedLayerId || event.dataTransfer.getData("text/plain");
+  const layers = activePage(state)?.layers;
+  if (!layers || !sourceId || !targetId || sourceId === targetId) return clearLayerDragState(state);
+  event.preventDefault();
+  if (!reorderLayers(layers, sourceId, targetId)) return clearLayerDragState(state);
+  state.dirty = true;
+  clearLayerDragState(state);
+  refreshBuilder(state);
+}
+
+function clearLayerDragState(state) {
+  state.draggedLayerId = null;
+  for (const element of state.root.querySelectorAll(".cr-builder-layer.is-dragging, .cr-builder-layer.is-drop-target")) {
+    element.classList.remove("is-dragging", "is-drop-target");
+  }
+}
+
+function reorderLayers(layers, sourceId, targetId) {
+  const sourceIndex = layers.findIndex((layer) => layer.id === sourceId);
+  const targetIndex = layers.findIndex((layer) => layer.id === targetId);
+  if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex) return false;
+  const [layer] = layers.splice(sourceIndex, 1);
+  layers.splice(targetIndex, 0, layer);
+  return true;
 }
 
 async function selectLayer(state, layerId) {
@@ -569,7 +621,7 @@ function refreshBuilder(state) {
   const page = activePage(state);
   state.root.querySelector("[data-builder-layers]").innerHTML = page?.layers.length
     ? page.layers.map((layer, index) => `
-      <article class="cr-builder-layer ${layer.id === state.activeLayerId ? "is-active" : ""}" data-layer-id="${escapeHtml(layer.id)}">
+      <article class="cr-builder-layer ${layer.id === state.activeLayerId ? "is-active" : ""}" data-layer-id="${escapeHtml(layer.id)}" draggable="true">
         <button type="button" data-builder-action="select-layer"><i class="fa-solid fa-layer-group"></i><strong>${escapeHtml(layer.name)}</strong><small>${layer.source ? layer.regions.length : "—"}</small></button>
         <button type="button" data-builder-action="rename-layer" title="${attr("CR.Builder.RenameLayer")}"><i class="fa-solid fa-pen"></i></button>
         <button type="button" data-builder-action="delete-layer" title="${attr("CR.Builder.DeleteLayer")}"><i class="fa-solid fa-trash"></i></button>
@@ -598,11 +650,12 @@ function refreshBuilder(state) {
     }).join("")
     : `<p class="cr-builder-no-regions">${text("CR.Builder.NoRegions")}</p>`;
 
-  state.root.querySelector("[data-builder-empty]").hidden = Boolean(state.baseImage);
+  const hasCanvasImage = state.previewStep === null ? Boolean(state.image) : Boolean(state.baseImage);
+  state.root.querySelector("[data-builder-empty]").hidden = hasCanvasImage;
   state.root.querySelector("[data-builder-empty]").textContent = page
     ? game.i18n.localize("CR.Builder.EmptyLayer")
     : game.i18n.localize("CR.Builder.Empty");
-  state.root.querySelector("[data-builder-canvas-wrap]").hidden = !state.baseImage;
+  state.root.querySelector("[data-builder-canvas-wrap]").hidden = !hasCanvasImage;
   for (const button of state.root.querySelectorAll("[data-builder-action='tool']")) {
     button.classList.toggle("is-active", button.dataset.tool === state.tool && state.previewStep === null);
   }
@@ -638,14 +691,8 @@ function renderCanvas(state) {
     return;
   }
 
-  context.drawImage(state.image ?? state.baseImage, 0, 0, canvas.width, canvas.height);
-  context.fillStyle = "rgb(0 0 0 / 58%)";
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  page.timeline.forEach((action, index) => {
-    const resolved = resolveAction(page, action);
-    const image = resolved ? state.layerImages.get(resolved.layer.id) : null;
-    if (image) drawClippedImage(context, image, resolved.region.points, canvas.width, canvas.height);
-  });
+  if (!state.image) return;
+  context.drawImage(state.image, 0, 0, canvas.width, canvas.height);
   const layer = activeLayer(state);
   for (const region of layer?.regions ?? []) {
     const index = page.timeline.findIndex((action) => action.layerId === layer.id && action.regionId === region.id);
@@ -897,6 +944,12 @@ async function onBuilderPaste(event) {
     ui.notifications.warn(game.i18n.localize("CR.Builder.OutputRequiredForPaste"));
     return;
   }
+  const layer = activeLayer(state);
+  if (!layer) {
+    ui.notifications.warn(game.i18n.localize("CR.Builder.LayerRequiredForPaste"));
+    return;
+  }
+  if (layer.source && !window.confirm(game.i18n.localize("CR.Builder.ReplaceLayerConfirm"))) return;
 
   state.exporting = true;
   state.root.classList.add("is-exporting");
@@ -907,13 +960,7 @@ async function onBuilderPaste(event) {
     const webp = await convertClipboardImageToWebp(imageFile);
     const filename = `source-${Date.now()}-${foundry.utils.randomID()}.webp`;
     const path = await uploadFile(sourceFolder, new File([webp], filename, { type: "image/webp" }));
-    if (!activePage(state)) addEmptyPage(state);
-    let layer = activeLayer(state);
-    if (layer?.source) {
-      await addEmptyLayer(state);
-      layer = activeLayer(state);
-    }
-    await assignLayerImage(state, layer, path);
+    await assignLayerImage(state, layer, path, { confirmReplace: false });
     setStatus(state, game.i18n.localize("CR.Builder.PasteComplete"));
     ui.notifications.info(game.i18n.localize("CR.Builder.PasteComplete"));
   } catch (error) {
@@ -1052,4 +1099,4 @@ function escapeHtml(value) {
 }
 
 export const projectFileName = PROJECT_FILENAME;
-export { normalizeProject, simplifyPoints };
+export { normalizeProject, reorderLayers, simplifyPoints };

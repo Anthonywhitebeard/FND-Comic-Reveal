@@ -28,6 +28,7 @@
   "CR.Builder.LayerName": "Слой {number}",
   "CR.Builder.LayerNamePrompt": "Название слоя",
   "CR.Builder.LayerRequired": "Сначала добавьте или выберите слой.",
+  "CR.Builder.LayerRequiredForPaste": "Перед вставкой добавьте страницу или слой и выделите его.",
   "CR.Builder.Layers": "Слои",
   "CR.Builder.NoRegions": "Области раскрытия ещё не созданы.",
   "CR.Builder.OutputFolder": "Папка результата",

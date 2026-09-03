@@ -29,9 +29,11 @@ The left sidebar selects, renames, reorders, and deletes pages. The right sideba
 
 ### Layers
 
-Each page contains one or more image layers. Click **Add empty layer**, select it, and paste or choose another full-size image. Any regions drawn while that layer is selected reveal pixels from that layer. Each newly drawn region is appended to the page's global click order.
+Each page contains one or more image layers. Click **Add empty layer**, select it, and paste or choose another full-size image. `Ctrl+V` always targets the selected layer; replacing a filled layer requires confirmation. Any regions drawn while that layer is selected reveal pixels from that layer. Each newly drawn region is appended to the page's global click order.
 
-This allows a later click to paint a region from another layer over everything already visible. Reveal entries from different layers can be freely reordered with the arrow buttons. For predictable alignment, use layer images with the same dimensions and composition.
+In edit mode, the canvas displays only the currently selected layer so its elements are easy to outline. The Preview controls show the cumulative result across all layers. Layers can be reordered by dragging their rows; reveal entries from different layers can be reordered independently with the arrow buttons.
+
+This allows a later click to paint a region from another layer over everything already visible. For predictable alignment, use layer images with the same dimensions and composition.
 
 ### Sound effects
 
@@ -41,7 +43,7 @@ Sound does not replay merely because a player reconnects or reloads while a fram
 
 The constructor creates cumulative WebP states in `page-01`, `page-02`, and so on. It also saves `comic-reveal-project.json` in the output folder. Use **Open project** later and select that file to edit the original page sources and outlines. Rebuilding updates the library automatically. Old surplus image files are ignored because playback follows the saved project manifest.
 
-You can copy an image in another application and press `Ctrl+V` anywhere in the constructor. The image is converted to WebP and uploaded to the project's `sources` folder. It fills the selected empty layer. If the selected layer already has an image, a new layer is created on the current page. Choose the output folder before pasting.
+You can copy an image in another application and press `Ctrl+V` anywhere in the constructor. The image is converted to WebP and uploaded to the project's `sources` folder. It fills the currently selected layer. Choose the output folder before pasting.
 
 Keep the source images in Foundry's user-data storage. The constructor never modifies the source images.
 
