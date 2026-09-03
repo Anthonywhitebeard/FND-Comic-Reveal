@@ -170,7 +170,7 @@ test("transitions stay aligned with naturally sorted frame images", () => {
       states: ["10.webp", "2.webp", "1.webp"],
       transitions: ["zoom-in", "slide-left", "blur"],
       overlays: ["overlay-10.webp", "overlay-2.webp", "overlay-1.webp"],
-      durations: [2000, 800, 0]
+      durations: [5000, 800, 0]
     }]
   }] });
   const transitionComic = library.comics[0];
@@ -179,6 +179,7 @@ test("transitions stay aligned with naturally sorted frame images", () => {
   assert.equal(getCurrentTransition(state, transitionComic), "slide-left");
   assert.equal(getCurrentOverlay(state, transitionComic), "overlay-2.webp");
   assert.equal(getCurrentDuration(state, transitionComic), 800);
+  assert.equal(getCurrentDuration({ ...state, stepIndex: 2 }, transitionComic), 5000);
   assert.deepEqual(getUpcomingOverlays({ ...state, stepIndex: 0 }, transitionComic), ["overlay-2.webp", "overlay-10.webp"]);
 });
 

@@ -752,7 +752,7 @@ function refreshBuilder(state) {
         <button type="button" data-builder-action="region-down" ${index === page.timeline.length - 1 ? "disabled" : ""}><i class="fa-solid fa-arrow-down"></i></button>
         <button type="button" data-builder-action="region-delete"><i class="fa-solid fa-trash"></i></button>
         <label class="cr-region-transition"><i class="fa-solid fa-wand-magic-sparkles"></i><select data-transition-index="${index}" title="${attr("CR.Builder.Transition")}">${transitionOptions}</select></label>
-        <label class="cr-region-duration" title="${attr("CR.Builder.TransitionDuration")}"><i class="fa-solid fa-gauge-high"></i><input type="range" min="0" max="2000" step="100" value="${action.duration}" data-duration-index="${index}"><output>${formatDuration(action.duration)}</output></label>
+        <label class="cr-region-duration" title="${attr("CR.Builder.TransitionDuration")}"><i class="fa-solid fa-gauge-high"></i><input type="range" min="0" max="5000" step="100" value="${action.duration}" data-duration-index="${index}"><output>${formatDuration(action.duration)}</output></label>
         <div class="cr-region-sound ${action.sound ? "has-sound" : ""}">
           <button type="button" data-builder-action="sound-select" title="${attr("CR.Builder.ChooseSound")}"><i class="fa-solid fa-music"></i><span>${escapeHtml(soundLabel)}</span></button>
           <button type="button" data-builder-action="sound-preview" title="${attr("CR.Builder.PreviewSound")}" ${action.sound ? "" : "disabled"}><i class="fa-solid fa-volume-high"></i></button>
@@ -1126,7 +1126,7 @@ function normalizeRotation(value) {
 
 function normalizeDuration(value) {
   const duration = Number(value);
-  return Number.isFinite(duration) ? Math.round(clamp(duration, 0, 2000) / 100) * 100 : 600;
+  return Number.isFinite(duration) ? Math.round(clamp(duration, 0, 5000) / 100) * 100 : 600;
 }
 
 function formatDuration(duration) {

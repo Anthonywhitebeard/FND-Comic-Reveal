@@ -83,7 +83,7 @@ Hooks.once("init", () => {
     scope: "world",
     config: true,
     type: Number,
-    range: { min: 0, max: 2000, step: 100 },
+    range: { min: 0, max: 5000, step: 100 },
     default: 600
   });
 });

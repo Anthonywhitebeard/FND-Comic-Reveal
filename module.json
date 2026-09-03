@@ -2,7 +2,7 @@
   "id": "comic-reveal",
   "title": "Comic Reveal",
   "description": "Lets the GM present cinematic comics to every player as a synchronized sequence of images.",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "authors": [
     {
       "name": "Anthony Whitebeard"

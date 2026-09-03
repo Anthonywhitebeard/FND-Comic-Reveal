@@ -45,7 +45,7 @@ This allows a later click to paint a region from another layer over everything a
 
 ### Reveal transitions
 
-Every reveal-order entry has a transition selector and a duration slider from instant (`0.0 s`) to `2.0 s` in `0.1 s` steps. Available effects include instant, fade, blur, fade from darkness, slides from all four sides, zoom in, and zoom out. The effect and timing belong to the frame and move with it when the reveal order changes.
+Every reveal-order entry has a transition selector and a duration slider from instant (`0.0 s`) to `5.0 s` in `0.1 s` steps. Available effects include instant, fade, blur, fade from darkness, slides from all four sides, zoom in, and zoom out. The effect and timing belong to the frame and move with it when the reveal order changes.
 
 The constructor previews these effects when advancing with the Preview controls. During export it also creates a transparent per-frame overlay in each page's `overlays` folder, so the animation affects only the newly revealed area while earlier frames remain unchanged. Projects built with an older module version must be rebuilt once to gain isolated-frame transitions.
 

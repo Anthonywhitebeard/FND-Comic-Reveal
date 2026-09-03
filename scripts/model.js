@@ -248,5 +248,5 @@ function normalizeDuration(value) {
 }
 
 function clampDuration(value) {
-  return Math.round(clamp(Number(value) || 0, 0, 2000) / 100) * 100;
+  return Math.round(clamp(Number(value) || 0, 0, 5000) / 100) * 100;
 }
