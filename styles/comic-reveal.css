@@ -656,6 +656,10 @@
   z-index: 120001 !important;
 }
 
+body.comic-reveal-builder-open #notifications {
+  z-index: 130000 !important;
+}
+
 @media (max-width: 1050px) {
   .cr-builder-header {
     grid-template-columns: auto 1fr 1fr auto;

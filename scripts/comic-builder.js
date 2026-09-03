@@ -11,6 +11,7 @@ export function openComicBuilder({ onExport, projectPath, initialProject } = {})
 
   builder = createBuilderState(onExport);
   builder.root = createBuilderElement();
+  document.body.classList.add("comic-reveal-builder-open");
   document.body.appendChild(builder.root);
   bindBuilder(builder);
   refreshBuilder(builder);
@@ -1172,6 +1173,7 @@ function closeBuilder(state) {
   if (state.dirty && !window.confirm(game.i18n.localize("CR.Builder.CloseConfirm"))) return;
   document.removeEventListener("keydown", onBuilderKeydown, true);
   window.removeEventListener("paste", onBuilderPaste, true);
+  document.body.classList.remove("comic-reveal-builder-open");
   state.root.classList.remove("is-open");
   setTimeout(() => state.root.remove(), 160);
   if (builder === state) builder = null;
