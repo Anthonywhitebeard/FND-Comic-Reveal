@@ -1,6 +1,13 @@
-# Comic Reveal
+<img width="2557" height="1407" alt="image" src="https://github.com/user-attachments/assets/a7770d29-c282-485c-b383-17a37e8aa30f" /># Comic Reveal
 
 Comic Reveal is a Foundry VTT v14 module for creating and presenting cinematic comics to every connected player. The GM advances a synchronized full-screen sequence one image at a time. Arbitrary panel shapes, curved borders, text, lighting changes, and other effects are supported because each reveal is exported as a complete prepared image.
+
+## Example
+### Comics
+<img width="2552" height="1401" alt="image" src="https://github.com/user-attachments/assets/1ee8cce5-6597-4b03-a008-72af30daeeae" />
+
+### Editor
+<img width="2557" height="1407" alt="image" src="https://github.com/user-attachments/assets/f4598922-1acd-4e2f-889c-5565bbd38a68" />
 
 ## Install
 
