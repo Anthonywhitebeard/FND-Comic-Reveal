@@ -2,8 +2,12 @@ import {
   EMPTY_PRESENTATION,
   advancePresentation,
   getCurrentImage,
+  getCurrentDuration,
+  getCurrentOverlay,
   getCurrentSound,
+  getCurrentTransition,
   getUpcomingImages,
+  getUpcomingOverlays,
   getUpcomingSounds,
   naturalCompare,
   normalizeLibrary,
@@ -71,6 +75,16 @@ Hooks.once("init", () => {
     type: Number,
     range: { min: 0, max: 1, step: 0.05 },
     default: 0.8
+  });
+
+  game.settings.register(MODULE_ID, "transitionDuration", {
+    name: "CR.Settings.TransitionDuration.Name",
+    hint: "CR.Settings.TransitionDuration.Hint",
+    scope: "world",
+    config: true,
+    type: Number,
+    range: { min: 0, max: 2000, step: 100 },
+    default: 600
   });
 });
 
@@ -316,7 +330,10 @@ async function scanComicFolder(folder, title, id) {
           .map((page, index) => ({
             name: String(page?.name || `Page ${index + 1}`),
             states: imageFiles(page?.states),
-            sounds: Array.isArray(page?.sounds) ? page.sounds.map((sound) => sound || null) : []
+            sounds: Array.isArray(page?.sounds) ? page.sounds.map((sound) => sound || null) : [],
+            transitions: Array.isArray(page?.transitions) ? page.transitions : [],
+            overlays: imageFiles(page?.overlays),
+            durations: Array.isArray(page?.durations) ? page.durations : []
           }))
           .filter((page) => page.states.length);
         if (pages.length) return { id, title: title || project.title, folder, pages };
@@ -383,6 +400,7 @@ function projectFromImageSequence(comic) {
           id: layerId,
           name: game.i18n.format("CR.Builder.ImportedLayerName", { number: stateIndex + 1 }),
           source,
+          transform: { x: 0.5, y: 0.5, scale: 1, rotation: 0 },
           regions: [{
             id: regionId,
             points: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }]
@@ -396,7 +414,9 @@ function projectFromImageSequence(comic) {
         timeline: layers.map((layer, stateIndex) => ({
           layerId: layer.id,
           regionId: layer.regions[0].id,
-          sound: page.sounds?.[stateIndex] ?? null
+          sound: page.sounds?.[stateIndex] ?? null,
+          transition: page.transitions?.[stateIndex] ?? "instant",
+          duration: page.durations?.[stateIndex] ?? 600
         }))
       };
     })
@@ -493,10 +513,20 @@ function applyPresentation(value, { playSound = true } = {}) {
   const overlay = ensureOverlay();
   overlay.classList.toggle("is-gm", game.user.isGM);
   overlay.classList.toggle("is-cover", game.settings.get(MODULE_ID, "imageFit") === "cover");
+  const transitionDuration = getCurrentDuration(incoming, comic, game.settings.get(MODULE_ID, "transitionDuration"));
+  overlay.style.setProperty("--cr-transition-duration", `${transitionDuration}ms`);
   for (const title of overlay.querySelectorAll("[data-cr-title]")) title.textContent = comic.title;
   overlay.querySelector("[data-cr-progress]").textContent = presentationLabel(incoming, comic);
-  renderPresentationImage(overlay, getCurrentImage(incoming, comic), incoming.revision);
+  renderPresentationImage(
+    overlay,
+    getCurrentImage(incoming, comic),
+    getCurrentOverlay(incoming, comic),
+    getCurrentTransition(incoming, comic),
+    incoming.revision,
+    transitionDuration
+  );
   preloadImages(getUpcomingImages(incoming, comic));
+  preloadImages(getUpcomingOverlays(incoming, comic));
   preloadSounds(getUpcomingSounds(incoming, comic));
   if (shouldPlaySound) playFrameSound(getCurrentSound(incoming, comic));
 }
@@ -526,9 +556,7 @@ function ensureOverlay() {
   overlay.id = "comic-reveal-overlay";
   overlay.className = "comic-reveal-overlay";
   overlay.innerHTML = `
-    <div class="cr-stage" data-cr-stage>
-      <img class="cr-image" data-cr-image alt="">
-    </div>
+    <div class="cr-stage" data-cr-stage></div>
     <div class="cr-player-title" data-cr-title></div>
     <div class="cr-gm-toolbar">
       <span class="cr-toolbar-title" data-cr-title></span>
@@ -565,37 +593,59 @@ function ensureOverlay() {
   return overlay;
 }
 
-async function renderPresentationImage(overlay, path, revision) {
+async function renderPresentationImage(overlay, path, overlayPath, transition, revision, duration) {
   const sequence = ++renderSequence;
-  const image = overlay.querySelector("[data-cr-image]");
+  const stage = overlay.querySelector("[data-cr-stage]");
   if (!path) {
-    image.classList.remove("is-visible");
-    image.removeAttribute("src");
+    stage.replaceChildren();
     return;
   }
 
-  if (image.getAttribute("src") === path) {
-    image.classList.add("is-visible");
-    return;
-  }
+  const current = stage.querySelector("[data-cr-current]");
+  if (current?.getAttribute("src") === path) return;
 
-  const loader = new Image();
-  loader.src = path;
-  try {
-    await loader.decode();
-  } catch {
-    await new Promise((resolve) => {
-      loader.onload = resolve;
-      loader.onerror = resolve;
-    });
-  }
+  const next = await loadPresentationImage(path);
+  const effect = transition === "instant" || duration === 0 ? null : await loadPresentationImage(overlayPath || path);
 
   if (sequence !== renderSequence || revision !== currentState.revision) return;
-  image.classList.remove("is-visible");
-  requestAnimationFrame(() => {
-    image.src = path;
-    image.classList.add("is-visible");
-  });
+  for (const stale of stage.querySelectorAll(".cr-image:not([data-cr-current])")) stale.remove();
+  next.className = "cr-image";
+  next.alt = "";
+
+  if (transition === "instant" || duration === 0) {
+    current?.remove();
+    next.dataset.crCurrent = "";
+    stage.appendChild(next);
+    return;
+  }
+
+  effect.className = `cr-image cr-transition-${transition}`;
+  effect.alt = "";
+  stage.appendChild(effect);
+  requestAnimationFrame(() => requestAnimationFrame(() => effect.classList.add("is-active")));
+  setTimeout(() => {
+    if (sequence !== renderSequence || revision !== currentState.revision || !effect.isConnected) return;
+    current?.remove();
+    effect.remove();
+    next.dataset.crCurrent = "";
+    stage.appendChild(next);
+  }, duration);
+}
+
+async function loadPresentationImage(path) {
+  const image = new Image();
+  image.src = path;
+  try {
+    await image.decode();
+  } catch {
+    if (!image.complete) {
+      await new Promise((resolve) => {
+        image.onload = resolve;
+        image.onerror = resolve;
+      });
+    }
+  }
+  return image;
 }
 
 function preloadImages(paths) {

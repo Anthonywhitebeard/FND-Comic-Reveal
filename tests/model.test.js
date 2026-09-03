@@ -3,9 +3,13 @@ import assert from "node:assert/strict";
 
 import {
   advancePresentation,
+  getCurrentDuration,
   getCurrentImage,
+  getCurrentOverlay,
   getCurrentSound,
+  getCurrentTransition,
   getUpcomingSounds,
+  getUpcomingOverlays,
   getUpcomingImages,
   naturalCompare,
   normalizeLibrary,
@@ -108,9 +112,29 @@ test("constructor keeps a global reveal timeline across image layers", () => {
     }]
   });
   assert.deepEqual(project.pages[0].timeline, [
-    { layerId: "base", regionId: "a", sound: null },
-    { layerId: "overlay", regionId: "b", sound: "sounds/impact.ogg" }
+    { layerId: "base", regionId: "a", sound: null, transition: "instant", duration: 600 },
+    { layerId: "overlay", regionId: "b", sound: "sounds/impact.ogg", transition: "instant", duration: 600 }
   ]);
+});
+
+test("constructor preserves layer transforms and frame transitions", () => {
+  const project = normalizeProject({
+    format: "comic-reveal-project",
+    title: "Animated",
+    outputFolder: "comics/animated",
+    pages: [{
+      layers: [{
+        id: "layer",
+        source: "layer.webp",
+        transform: { x: 0.25, y: 0.75, scale: 1.4, rotation: 25 },
+        regions: [{ id: "region", points: [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 0, y: 1 }] }]
+      }],
+      timeline: [{ layerId: "layer", regionId: "region", transition: "blur", duration: 1400 }]
+    }]
+  });
+  assert.deepEqual(project.pages[0].layers[0].transform, { x: 0.25, y: 0.75, scale: 1.4, rotation: 25 });
+  assert.equal(project.pages[0].timeline[0].transition, "blur");
+  assert.equal(project.pages[0].timeline[0].duration, 1400);
 });
 
 test("freehand point simplification removes near-duplicate samples", () => {
@@ -137,6 +161,25 @@ test("sound effects stay aligned with naturally sorted frame images", () => {
   assert.equal(getCurrentImage(state, soundComic), "2.webp");
   assert.equal(getCurrentSound(state, soundComic), "two.ogg");
   assert.deepEqual(getUpcomingSounds({ ...state, stepIndex: 0 }, soundComic), ["two.ogg", "ten.ogg"]);
+});
+
+test("transitions stay aligned with naturally sorted frame images", () => {
+  const library = normalizeLibrary({ comics: [{
+    id: "transitions",
+    pages: [{
+      states: ["10.webp", "2.webp", "1.webp"],
+      transitions: ["zoom-in", "slide-left", "blur"],
+      overlays: ["overlay-10.webp", "overlay-2.webp", "overlay-1.webp"],
+      durations: [2000, 800, 0]
+    }]
+  }] });
+  const transitionComic = library.comics[0];
+  assert.deepEqual(transitionComic.pages[0].transitions, ["blur", "slide-left", "zoom-in"]);
+  const state = { ...startPresentation(transitionComic), stepIndex: 1 };
+  assert.equal(getCurrentTransition(state, transitionComic), "slide-left");
+  assert.equal(getCurrentOverlay(state, transitionComic), "overlay-2.webp");
+  assert.equal(getCurrentDuration(state, transitionComic), 800);
+  assert.deepEqual(getUpcomingOverlays({ ...state, stepIndex: 0 }, transitionComic), ["overlay-2.webp", "overlay-10.webp"]);
 });
 
 test("layers can be reordered by drag target identifiers", () => {

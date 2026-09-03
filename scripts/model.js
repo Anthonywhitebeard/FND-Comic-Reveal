@@ -40,10 +40,16 @@ export function normalizeComic(value) {
 
 function normalizePage(value, index) {
   const sounds = Array.isArray(value?.sounds) ? value.sounds : [];
+  const transitions = Array.isArray(value?.transitions) ? value.transitions : [];
+  const overlays = Array.isArray(value?.overlays) ? value.overlays : [];
+  const durations = Array.isArray(value?.durations) ? value.durations : [];
   const entries = (Array.isArray(value?.states) ? value.states : [])
     .map((state, stateIndex) => ({
       state: String(state),
-      sound: sounds[stateIndex] ? String(sounds[stateIndex]) : null
+      sound: sounds[stateIndex] ? String(sounds[stateIndex]) : null,
+      transition: normalizeTransition(transitions[stateIndex]),
+      overlay: overlays[stateIndex] ? String(overlays[stateIndex]) : null,
+      duration: normalizeDuration(durations[stateIndex])
     }))
     .filter((entry) => entry.state)
     .sort((left, right) => naturalCompare(left.state, right.state));
@@ -51,7 +57,10 @@ function normalizePage(value, index) {
   return {
     name: String(value?.name || `Page ${index + 1}`),
     states: entries.map((entry) => entry.state),
-    sounds: entries.map((entry) => entry.sound)
+    sounds: entries.map((entry) => entry.sound),
+    transitions: entries.map((entry) => entry.transition),
+    overlays: entries.map((entry) => entry.overlay),
+    durations: entries.map((entry) => entry.duration)
   };
 }
 
@@ -132,6 +141,24 @@ export function getCurrentSound(state, comic) {
   return comic.pages[current.pageIndex]?.sounds?.[current.stepIndex] ?? null;
 }
 
+export function getCurrentTransition(state, comic) {
+  const current = normalizePresentation(state);
+  if (!current.open || !comic?.pages?.length || current.stepIndex < 0) return "instant";
+  return normalizeTransition(comic.pages[current.pageIndex]?.transitions?.[current.stepIndex]);
+}
+
+export function getCurrentOverlay(state, comic) {
+  const current = normalizePresentation(state);
+  if (!current.open || !comic?.pages?.length || current.stepIndex < 0) return null;
+  return comic.pages[current.pageIndex]?.overlays?.[current.stepIndex] ?? null;
+}
+
+export function getCurrentDuration(state, comic, fallback = 600) {
+  const current = normalizePresentation(state);
+  if (!current.open || !comic?.pages?.length || current.stepIndex < 0) return clampDuration(fallback);
+  return comic.pages[current.pageIndex]?.durations?.[current.stepIndex] ?? clampDuration(fallback);
+}
+
 export function getUpcomingImages(state, comic, count = 2) {
   const current = normalizePresentation(state);
   if (!current.open || !comic?.pages?.length) return [];
@@ -151,6 +178,26 @@ export function getUpcomingImages(state, comic, count = 2) {
   }
 
   return images;
+}
+
+export function getUpcomingOverlays(state, comic, count = 2) {
+  const current = normalizePresentation(state);
+  if (!current.open || !comic?.pages?.length) return [];
+
+  const overlays = [];
+  let pageIndex = current.pageIndex;
+  let stepIndex = current.stepIndex + 1;
+  while (pageIndex < comic.pages.length && overlays.length < count) {
+    const page = comic.pages[pageIndex];
+    while (stepIndex < page.states.length && overlays.length < count) {
+      const overlay = page.overlays?.[stepIndex];
+      if (overlay) overlays.push(overlay);
+      stepIndex += 1;
+    }
+    pageIndex += 1;
+    stepIndex = 0;
+  }
+  return overlays;
 }
 
 export function getUpcomingSounds(state, comic, count = 2) {
@@ -188,4 +235,18 @@ function toInteger(value, fallback) {
 
 function clamp(value, minimum, maximum) {
   return Math.min(Math.max(value, minimum), maximum);
+}
+
+function normalizeTransition(value) {
+  const transitions = new Set(["instant", "fade", "blur", "dark", "slide-left", "slide-right", "slide-top", "slide-bottom", "zoom-in", "zoom-out"]);
+  return transitions.has(value) ? value : "instant";
+}
+
+function normalizeDuration(value) {
+  if (!Number.isFinite(Number(value))) return null;
+  return clampDuration(value);
+}
+
+function clampDuration(value) {
+  return Math.round(clamp(Number(value) || 0, 0, 2000) / 100) * 100;
 }

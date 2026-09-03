@@ -1,6 +1,7 @@
 const MODULE_ID = "comic-reveal";
 const PROJECT_FILENAME = "comic-reveal-project.json";
 const COLORS = ["#55d6ff", "#ffcf56", "#ff6b9d", "#7cff6b", "#c69cff", "#ff8c42"];
+const TRANSITIONS = ["instant", "fade", "blur", "dark", "slide-left", "slide-right", "slide-top", "slide-bottom", "zoom-in", "zoom-out"];
 
 let builder = null;
 
@@ -30,7 +31,7 @@ function createBuilderState(onExport) {
     },
     activePageId: null,
     activeLayerId: null,
-    tool: "freehand",
+    tool: "transform",
     draft: [],
     drawing: false,
     previewStep: null,
@@ -41,6 +42,8 @@ function createBuilderState(onExport) {
     dirty: false,
     exporting: false,
     draggedLayerId: null,
+    transformDrag: null,
+    previewAnimation: null,
     onExport
   };
 }
@@ -71,11 +74,20 @@ function createBuilderElement() {
         </div>
         <div class="cr-builder-tools">
           <div class="cr-tool-group" data-builder-tools>
+            <button type="button" data-builder-action="tool" data-tool="transform" title="${attr("CR.Builder.TransformHint")}"><i class="fa-solid fa-up-down-left-right"></i> ${text("CR.Builder.Transform")}</button>
             <button type="button" data-builder-action="tool" data-tool="freehand" title="${attr("CR.Builder.FreehandHint")}"><i class="fa-solid fa-signature"></i> ${text("CR.Builder.Freehand")}</button>
             <button type="button" data-builder-action="tool" data-tool="polygon" title="${attr("CR.Builder.PolygonHint")}"><i class="fa-solid fa-draw-polygon"></i> ${text("CR.Builder.Polygon")}</button>
             <button type="button" data-builder-action="tool" data-tool="rectangle"><i class="fa-regular fa-square"></i> ${text("CR.Builder.Rectangle")}</button>
             <button type="button" data-builder-action="finish-polygon"><i class="fa-solid fa-check"></i> ${text("CR.Builder.Finish")}</button>
             <button type="button" data-builder-action="cancel-draft"><i class="fa-solid fa-ban"></i> ${text("CR.Builder.Cancel")}</button>
+          </div>
+          <div class="cr-tool-group cr-transform-controls" data-transform-controls>
+            <button type="button" data-builder-action="scale-down" title="${attr("CR.Builder.ScaleDown")}"><i class="fa-solid fa-magnifying-glass-minus"></i></button>
+            <span data-builder-transform-label></span>
+            <button type="button" data-builder-action="scale-up" title="${attr("CR.Builder.ScaleUp")}"><i class="fa-solid fa-magnifying-glass-plus"></i></button>
+            <button type="button" data-builder-action="rotate-left" title="${attr("CR.Builder.RotateLeft")}"><i class="fa-solid fa-rotate-left"></i></button>
+            <button type="button" data-builder-action="rotate-right" title="${attr("CR.Builder.RotateRight")}"><i class="fa-solid fa-rotate-right"></i></button>
+            <button type="button" data-builder-action="reset-transform" title="${attr("CR.Builder.ResetTransform")}"><i class="fa-solid fa-arrows-rotate"></i></button>
           </div>
           <div class="cr-tool-group">
             <button type="button" data-builder-action="preview-edit"><i class="fa-solid fa-pen"></i> ${text("CR.Builder.EditMode")}</button>
@@ -106,6 +118,8 @@ function bindBuilder(state) {
   state.root.addEventListener("dragover", (event) => onLayerDragOver(state, event));
   state.root.addEventListener("drop", (event) => onLayerDrop(state, event));
   state.root.addEventListener("dragend", () => clearLayerDragState(state));
+  state.root.addEventListener("change", (event) => onBuilderChange(state, event));
+  state.root.addEventListener("input", (event) => onBuilderChange(state, event));
   state.root.querySelector("[name='projectTitle']").addEventListener("input", (event) => {
     state.project.title = event.target.value;
     state.dirty = true;
@@ -120,6 +134,7 @@ function bindBuilder(state) {
   canvas.addEventListener("pointermove", (event) => onCanvasPointerMove(state, event));
   canvas.addEventListener("pointerup", (event) => onCanvasPointerUp(state, event));
   canvas.addEventListener("pointercancel", (event) => onCanvasPointerUp(state, event));
+  canvas.addEventListener("wheel", (event) => onCanvasWheel(state, event), { passive: false });
   canvas.addEventListener("dblclick", (event) => {
     if (state.tool !== "polygon") return;
     event.preventDefault();
@@ -161,6 +176,11 @@ async function onBuilderClick(state, event) {
       state.drawing = false;
       return renderCanvas(state);
     }
+    if (action === "scale-down") return adjustLayerScale(state, 0.9);
+    if (action === "scale-up") return adjustLayerScale(state, 1.1);
+    if (action === "rotate-left") return adjustLayerRotation(state, -5);
+    if (action === "rotate-right") return adjustLayerRotation(state, 5);
+    if (action === "reset-transform") return resetLayerTransform(state);
     if (action === "preview-edit") {
       state.previewStep = null;
       return refreshBuilder(state);
@@ -243,8 +263,27 @@ function createLayer(number, source = "") {
     id: foundry.utils.randomID(),
     name: game.i18n.format("CR.Builder.LayerName", { number }),
     source,
+    transform: defaultTransform(),
     regions: []
   };
+}
+
+function onBuilderChange(state, event) {
+  const select = event.target.closest?.("[data-transition-index]");
+  if (select) {
+    const action = activePage(state)?.timeline[Number(select.dataset.transitionIndex)];
+    if (!action || !TRANSITIONS.includes(select.value)) return;
+    action.transition = select.value;
+    state.dirty = true;
+    return;
+  }
+  const slider = event.target.closest?.("[data-duration-index]");
+  if (!slider) return;
+  const action = activePage(state)?.timeline[Number(slider.dataset.durationIndex)];
+  if (!action) return;
+  action.duration = normalizeDuration(slider.value);
+  slider.closest(".cr-region-duration")?.querySelector("output")?.replaceChildren(formatDuration(action.duration));
+  state.dirty = true;
 }
 
 function chooseLayerImage(state) {
@@ -495,6 +534,13 @@ function onCanvasPointerDown(state, event) {
   if (!state.image || state.previewStep !== null || event.button !== 0) return;
   event.preventDefault();
   const point = canvasPoint(event);
+  if (state.tool === "transform") {
+    const layer = activeLayer(state);
+    if (!layer) return;
+    state.transformDrag = { point, transform: { ...layer.transform } };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    return;
+  }
   if (state.tool === "polygon") {
     state.draft.push(point);
     renderCanvas(state);
@@ -506,6 +552,17 @@ function onCanvasPointerDown(state, event) {
 }
 
 function onCanvasPointerMove(state, event) {
+  if (state.transformDrag && state.image && state.previewStep === null) {
+    const layer = activeLayer(state);
+    if (!layer) return;
+    const point = canvasPoint(event, false);
+    layer.transform.x = clamp(state.transformDrag.transform.x + point.x - state.transformDrag.point.x, -2, 3);
+    layer.transform.y = clamp(state.transformDrag.transform.y + point.y - state.transformDrag.point.y, -2, 3);
+    state.dirty = true;
+    updateTransformControls(state);
+    renderCanvas(state);
+    return;
+  }
   if (!state.drawing || !state.image || state.previewStep !== null) return;
   const point = canvasPoint(event);
   if (state.tool === "rectangle") {
@@ -517,6 +574,11 @@ function onCanvasPointerMove(state, event) {
 }
 
 function onCanvasPointerUp(state, event) {
+  if (state.transformDrag) {
+    state.transformDrag = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    return;
+  }
   if (!state.drawing) return;
   state.drawing = false;
   event.currentTarget.releasePointerCapture?.(event.pointerId);
@@ -537,7 +599,7 @@ function finishDraft(state) {
   }
   const region = { id: foundry.utils.randomID(), points };
   layer.regions.push(region);
-  page.timeline.push({ layerId: layer.id, regionId: region.id, sound: null });
+  page.timeline.push({ layerId: layer.id, regionId: region.id, sound: null, transition: "instant", duration: 600 });
   state.draft = [];
   state.drawing = false;
   state.dirty = true;
@@ -596,12 +658,60 @@ function clearRegionSound(state, index) {
   refreshBuilder(state);
 }
 
+function onCanvasWheel(state, event) {
+  if (state.tool !== "transform" || state.previewStep !== null || !state.image) return;
+  event.preventDefault();
+  if (event.shiftKey) adjustLayerRotation(state, event.deltaY < 0 ? 5 : -5);
+  else adjustLayerScale(state, event.deltaY < 0 ? 1.05 : 0.95);
+}
+
+function adjustLayerScale(state, factor) {
+  const layer = activeLayer(state);
+  if (!layer?.source) return;
+  layer.transform.scale = clamp(layer.transform.scale * factor, 0.05, 10);
+  state.dirty = true;
+  updateTransformControls(state);
+  renderCanvas(state);
+}
+
+function adjustLayerRotation(state, degrees) {
+  const layer = activeLayer(state);
+  if (!layer?.source) return;
+  layer.transform.rotation = normalizeRotation(layer.transform.rotation + degrees);
+  state.dirty = true;
+  updateTransformControls(state);
+  renderCanvas(state);
+}
+
+function resetLayerTransform(state) {
+  const layer = activeLayer(state);
+  if (!layer?.source) return;
+  layer.transform = defaultTransform();
+  state.dirty = true;
+  updateTransformControls(state);
+  renderCanvas(state);
+}
+
+function updateTransformControls(state) {
+  const layer = activeLayer(state);
+  const transform = layer?.transform ?? defaultTransform();
+  const label = state.root?.querySelector("[data-builder-transform-label]");
+  if (label) label.textContent = `${Math.round(transform.scale * 100)}% · ${Math.round(transform.rotation)}°`;
+  const controls = state.root?.querySelector("[data-transform-controls]");
+  if (controls) controls.hidden = state.previewStep !== null || !state.image;
+  state.root?.querySelector("[data-builder-canvas]")?.classList.toggle("is-transform-tool", state.tool === "transform" && state.previewStep === null);
+}
+
 function changePreview(state, delta) {
   const count = activePage(state)?.timeline.length ?? 0;
   if (!count) return;
-  if (state.previewStep === null) state.previewStep = -1;
-  state.previewStep = Math.min(count - 1, Math.max(-1, state.previewStep + delta));
+  const previousStep = state.previewStep === null ? -1 : state.previewStep;
+  state.previewStep = Math.min(count - 1, Math.max(-1, previousStep + delta));
   refreshBuilder(state);
+  const action = activePage(state)?.timeline[state.previewStep];
+  if (delta > 0 && state.previewStep > previousStep && action?.transition !== "instant") {
+    startPreviewTransition(state, state.previewStep, action.transition);
+  }
 }
 
 function refreshBuilder(state) {
@@ -633,6 +743,7 @@ function refreshBuilder(state) {
     ? page.timeline.map((action, index) => {
       const resolved = resolveAction(page, action);
       const soundLabel = action.sound ? fileName(action.sound) : game.i18n.localize("CR.Builder.NoSound");
+      const transitionOptions = TRANSITIONS.map((transition) => `<option value="${transition}" ${action.transition === transition ? "selected" : ""}>${text(`CR.Transition.${transition}`)}</option>`).join("");
       return `
       <article class="cr-builder-region" data-region-index="${index}">
         <span style="--region-color:${COLORS[index % COLORS.length]}">${index + 1}</span>
@@ -640,6 +751,8 @@ function refreshBuilder(state) {
         <button type="button" data-builder-action="region-up" ${index === 0 ? "disabled" : ""}><i class="fa-solid fa-arrow-up"></i></button>
         <button type="button" data-builder-action="region-down" ${index === page.timeline.length - 1 ? "disabled" : ""}><i class="fa-solid fa-arrow-down"></i></button>
         <button type="button" data-builder-action="region-delete"><i class="fa-solid fa-trash"></i></button>
+        <label class="cr-region-transition"><i class="fa-solid fa-wand-magic-sparkles"></i><select data-transition-index="${index}" title="${attr("CR.Builder.Transition")}">${transitionOptions}</select></label>
+        <label class="cr-region-duration" title="${attr("CR.Builder.TransitionDuration")}"><i class="fa-solid fa-gauge-high"></i><input type="range" min="0" max="2000" step="100" value="${action.duration}" data-duration-index="${index}"><output>${formatDuration(action.duration)}</output></label>
         <div class="cr-region-sound ${action.sound ? "has-sound" : ""}">
           <button type="button" data-builder-action="sound-select" title="${attr("CR.Builder.ChooseSound")}"><i class="fa-solid fa-music"></i><span>${escapeHtml(soundLabel)}</span></button>
           <button type="button" data-builder-action="sound-preview" title="${attr("CR.Builder.PreviewSound")}" ${action.sound ? "" : "disabled"}><i class="fa-solid fa-volume-high"></i></button>
@@ -664,6 +777,7 @@ function refreshBuilder(state) {
   state.root.querySelector("[data-builder-preview-label]").textContent = state.previewStep === null
     ? game.i18n.localize("CR.Builder.Editing")
     : game.i18n.format("CR.Builder.PreviewState", { current: state.previewStep + 1, total: page?.timeline.length ?? 0 });
+  updateTransformControls(state);
   renderCanvas(state);
 }
 
@@ -674,6 +788,7 @@ function resolveAction(page, action) {
 }
 
 function renderCanvas(state) {
+  cancelPreviewAnimation(state);
   const canvas = state.root?.querySelector("[data-builder-canvas]");
   const page = activePage(state);
   if (!canvas || !page || !state.baseImage) return;
@@ -681,19 +796,13 @@ function renderCanvas(state) {
   context.clearRect(0, 0, canvas.width, canvas.height);
 
   if (state.previewStep !== null) {
-    context.fillStyle = "#000";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    for (let index = 0; index <= state.previewStep; index += 1) {
-      const resolved = resolveAction(page, page.timeline[index]);
-      const image = resolved ? state.layerImages.get(resolved.layer.id) : null;
-      if (image) drawClippedImage(context, image, resolved.region.points, canvas.width, canvas.height);
-    }
+    drawTimelineState(context, state, page, state.previewStep, canvas.width, canvas.height);
     return;
   }
 
   if (!state.image) return;
-  context.drawImage(state.image, 0, 0, canvas.width, canvas.height);
   const layer = activeLayer(state);
+  drawLayerImage(context, state.image, layer, canvas.width, canvas.height);
   for (const region of layer?.regions ?? []) {
     const index = page.timeline.findIndex((action) => action.layerId === layer.id && action.regionId === region.id);
     strokeRegion(context, region.points, canvas.width, canvas.height, COLORS[Math.max(0, index) % COLORS.length], index + 1);
@@ -701,12 +810,106 @@ function renderCanvas(state) {
   if (state.draft.length) strokeRegion(context, state.draft, canvas.width, canvas.height, "#ffffff", "+", false);
 }
 
-function drawClippedImage(context, image, points, width, height) {
+function drawTimelineState(context, state, page, endIndex, width, height) {
+  context.clearRect(0, 0, width, height);
+  context.fillStyle = "#000";
+  context.fillRect(0, 0, width, height);
+  for (let index = 0; index <= endIndex; index += 1) {
+    const resolved = resolveAction(page, page.timeline[index]);
+    const image = resolved ? state.layerImages.get(resolved.layer.id) : null;
+    if (image) drawClippedImage(context, image, resolved.layer, resolved.region.points, width, height);
+  }
+}
+
+function startPreviewTransition(state, stepIndex, transition) {
+  cancelPreviewAnimation(state);
+  const canvas = state.root?.querySelector("[data-builder-canvas]");
+  const page = activePage(state);
+  const resolved = resolveAction(page, page?.timeline[stepIndex]);
+  const image = resolved ? state.layerImages.get(resolved.layer.id) : null;
+  if (!canvas || !page || !image) return;
+
+  const base = document.createElement("canvas");
+  const delta = document.createElement("canvas");
+  base.width = delta.width = canvas.width;
+  base.height = delta.height = canvas.height;
+  drawTimelineState(base.getContext("2d"), state, page, stepIndex - 1, canvas.width, canvas.height);
+  drawClippedImage(delta.getContext("2d"), image, resolved.layer, resolved.region.points, canvas.width, canvas.height);
+
+  const context = canvas.getContext("2d");
+  const duration = normalizeDuration(page.timeline[stepIndex]?.duration);
+  if (duration === 0) return renderCanvas(state);
+  const startedAt = performance.now();
+  const tick = (now) => {
+    if (state.previewStep !== stepIndex || !canvas.isConnected) return cancelPreviewAnimation(state);
+    const progress = Math.min(1, Math.max(0, (now - startedAt) / duration));
+    const eased = 1 - ((1 - progress) ** 3);
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(base, 0, 0);
+    drawTransitionFrame(context, delta, transition, eased);
+    if (progress < 1) state.previewAnimation = requestAnimationFrame(tick);
+    else {
+      state.previewAnimation = null;
+      renderCanvas(state);
+    }
+  };
+  tick(startedAt);
+}
+
+function drawTransitionFrame(context, delta, transition, progress) {
+  const width = delta.width;
+  const height = delta.height;
+  let scale = 1;
+  let x = 0;
+  let y = 0;
+  context.save();
+  if (transition === "fade") context.globalAlpha = progress;
+  if (transition === "blur") {
+    context.globalAlpha = 0.15 + 0.85 * progress;
+    context.filter = `blur(${Math.round(32 * (1 - progress))}px)`;
+  }
+  if (transition === "dark") context.filter = `brightness(${progress})`;
+  if (transition === "slide-left") x = -width * (1 - progress);
+  if (transition === "slide-right") x = width * (1 - progress);
+  if (transition === "slide-top") y = -height * (1 - progress);
+  if (transition === "slide-bottom") y = height * (1 - progress);
+  if (transition === "zoom-in") {
+    scale = 0.55 + 0.45 * progress;
+    context.globalAlpha = progress;
+  }
+  if (transition === "zoom-out") {
+    scale = 1.5 - 0.5 * progress;
+    context.globalAlpha = progress;
+  }
+  context.translate(width / 2 + x, height / 2 + y);
+  context.scale(scale, scale);
+  context.drawImage(delta, -width / 2, -height / 2);
+  context.restore();
+}
+
+function cancelPreviewAnimation(state) {
+  if (state.previewAnimation !== null) cancelAnimationFrame(state.previewAnimation);
+  state.previewAnimation = null;
+}
+
+function drawClippedImage(context, image, layer, points, width, height) {
   if (!points?.length) return;
   context.save();
   makePath(context, points, width, height, true);
   context.clip();
-  context.drawImage(image, 0, 0, width, height);
+  drawLayerImage(context, image, layer, width, height);
+  context.restore();
+}
+
+function drawLayerImage(context, image, layer, width, height) {
+  if (!image) return;
+  const transform = normalizeTransform(layer?.transform);
+  const fitScale = Math.min(width / image.naturalWidth, height / image.naturalHeight);
+  const scale = fitScale * transform.scale;
+  context.save();
+  context.translate(transform.x * width, transform.y * height);
+  context.rotate(transform.rotation * Math.PI / 180);
+  context.drawImage(image, -image.naturalWidth * scale / 2, -image.naturalHeight * scale / 2, image.naturalWidth * scale, image.naturalHeight * scale);
   context.restore();
 }
 
@@ -764,6 +967,9 @@ async function exportProject(state) {
       canvas.height = baseImage.naturalHeight;
       const context = canvas.getContext("2d");
       const states = [];
+      const overlays = [];
+      const overlayFolder = `${pageFolder}/overlays`;
+      await ensureDirectoryTree(overlayFolder);
 
       for (let regionIndex = 0; regionIndex < page.timeline.length; regionIndex += 1) {
         context.fillStyle = "#000";
@@ -771,17 +977,27 @@ async function exportProject(state) {
         for (let revealIndex = 0; revealIndex <= regionIndex; revealIndex += 1) {
           const resolved = resolveAction(page, page.timeline[revealIndex]);
           const image = resolved ? layerImages.get(resolved.layer.id) : null;
-          if (image) drawClippedImage(context, image, resolved.region.points, canvas.width, canvas.height);
+          if (image) drawClippedImage(context, image, resolved.layer, resolved.region.points, canvas.width, canvas.height);
         }
         const blob = await canvasBlob(canvas, "image/webp", 0.92);
         const filename = `${String(regionIndex + 1).padStart(2, "0")}.webp`;
         const path = await uploadFile(pageFolder, new File([blob], filename, { type: "image/webp" }));
         states.push(path);
+        const resolved = resolveAction(page, page.timeline[regionIndex]);
+        const overlayImage = resolved ? layerImages.get(resolved.layer.id) : null;
+        const overlayCanvas = document.createElement("canvas");
+        overlayCanvas.width = canvas.width;
+        overlayCanvas.height = canvas.height;
+        if (overlayImage) drawClippedImage(overlayCanvas.getContext("2d"), overlayImage, resolved.layer, resolved.region.points, canvas.width, canvas.height);
+        const overlayBlob = await canvasBlob(overlayCanvas, "image/webp", 0.92);
+        overlays.push(await uploadFile(overlayFolder, new File([overlayBlob], filename, { type: "image/webp" })));
         completed += 1;
         setStatus(state, game.i18n.format("CR.Builder.ExportProgress", { current: completed, total }));
       }
-      outputPages.push({ name: page.name, states });
+      outputPages.push({ name: page.name, states, overlays });
       outputPages[outputPages.length - 1].sounds = page.timeline.map((action) => action.sound || null);
+      outputPages[outputPages.length - 1].transitions = page.timeline.map((action) => action.transition || "instant");
+      outputPages[outputPages.length - 1].durations = page.timeline.map((action) => normalizeDuration(action.duration));
     }
 
     const manifest = { ...project, exportedAt: Date.now(), outputs: outputPages };
@@ -833,7 +1049,9 @@ function normalizePage(page, pageIndex) {
     timeline = (Array.isArray(page.timeline) ? page.timeline : []).map((entry) => ({
       layerId: String(entry.layerId ?? ""),
       regionId: String(entry.regionId ?? ""),
-      sound: entry.sound ? String(entry.sound) : null
+      sound: entry.sound ? String(entry.sound) : null,
+      transition: TRANSITIONS.includes(entry.transition) ? entry.transition : "instant",
+      duration: normalizeDuration(entry.duration)
     }));
   } else {
     const legacyLayer = normalizeLayer({
@@ -846,7 +1064,9 @@ function normalizePage(page, pageIndex) {
     timeline = legacyLayer.regions.map((region, regionIndex) => ({
       layerId: legacyLayer.id,
       regionId: region.id,
-      sound: page.sounds?.[regionIndex] ? String(page.sounds[regionIndex]) : null
+      sound: page.sounds?.[regionIndex] ? String(page.sounds[regionIndex]) : null,
+      transition: TRANSITIONS.includes(page.transitions?.[regionIndex]) ? page.transitions[regionIndex] : "instant",
+      duration: normalizeDuration(page.durations?.[regionIndex])
     }));
   }
 
@@ -859,7 +1079,7 @@ function normalizePage(page, pageIndex) {
   for (const layer of layers) {
     for (const region of layer.regions) {
       const key = `${layer.id}.${region.id}`;
-      if (!knownRegionIds.has(key)) validActions.push({ layerId: layer.id, regionId: region.id, sound: null });
+      if (!knownRegionIds.has(key)) validActions.push({ layerId: layer.id, regionId: region.id, sound: null, transition: "instant", duration: 600 });
     }
   }
 
@@ -876,6 +1096,7 @@ function normalizeLayer(layer, layerIndex) {
     id: String(layer.id || makeId(`layer-${layerIndex}`)),
     name: String(layer.name || `Layer ${layerIndex + 1}`),
     source: String(layer.source || ""),
+    transform: normalizeTransform(layer.transform),
     regions: (Array.isArray(layer.regions) ? layer.regions : []).map((region, regionIndex) => ({
       id: String(region.id || makeId(`region-${regionIndex}`)),
       points: (Array.isArray(region.points) ? region.points : []).map((point) => ({
@@ -884,6 +1105,32 @@ function normalizeLayer(layer, layerIndex) {
       })).filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
     })).filter((region) => region.points.length >= 3)
   };
+}
+
+function defaultTransform() {
+  return { x: 0.5, y: 0.5, scale: 1, rotation: 0 };
+}
+
+function normalizeTransform(value) {
+  return {
+    x: clamp(Number.isFinite(Number(value?.x)) ? Number(value.x) : 0.5, -2, 3),
+    y: clamp(Number.isFinite(Number(value?.y)) ? Number(value.y) : 0.5, -2, 3),
+    scale: clamp(Number.isFinite(Number(value?.scale)) ? Number(value.scale) : 1, 0.05, 10),
+    rotation: normalizeRotation(Number.isFinite(Number(value?.rotation)) ? Number(value.rotation) : 0)
+  };
+}
+
+function normalizeRotation(value) {
+  return ((value + 180) % 360 + 360) % 360 - 180;
+}
+
+function normalizeDuration(value) {
+  const duration = Number(value);
+  return Number.isFinite(duration) ? Math.round(clamp(duration, 0, 2000) / 100) * 100 : 600;
+}
+
+function formatDuration(duration) {
+  return game.i18n.format("CR.Builder.TransitionDurationValue", { seconds: (normalizeDuration(duration) / 1000).toFixed(1) });
 }
 
 function makeId(fallback) {
@@ -1020,11 +1267,13 @@ function onBuilderKeydown(event) {
   }
 }
 
-function canvasPoint(event) {
+function canvasPoint(event, bounded = true) {
   const rect = event.currentTarget.getBoundingClientRect();
+  const x = (event.clientX - rect.left) / rect.width;
+  const y = (event.clientY - rect.top) / rect.height;
   return {
-    x: clamp((event.clientX - rect.left) / rect.width, 0, 1),
-    y: clamp((event.clientY - rect.top) / rect.height, 0, 1)
+    x: bounded ? clamp(x, 0, 1) : x,
+    y: bounded ? clamp(y, 0, 1) : y
   };
 }
 
