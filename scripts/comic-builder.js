@@ -1,7 +1,7 @@
 const MODULE_ID = "comic-reveal";
 const PROJECT_FILENAME = "comic-reveal-project.json";
 const COLORS = ["#55d6ff", "#ffcf56", "#ff6b9d", "#7cff6b", "#c69cff", "#ff8c42"];
-const TRANSITIONS = ["instant", "fade", "blur", "dark", "slide-left", "slide-right", "slide-top", "slide-bottom", "zoom-in", "zoom-out"];
+const TRANSITIONS = ["instant", "fade", "blur", "dark", "slide-left", "slide-right", "slide-top", "slide-bottom", "zoom-in", "zoom-out", "reveal-ltr", "reveal-rtl", "reveal-ttb", "reveal-btt"];
 
 let builder = null;
 
@@ -21,13 +21,15 @@ export function openComicBuilder({ onExport, projectPath, initialProject } = {})
 }
 
 function createBuilderState(onExport) {
+  const projectId = foundry.utils.randomID();
   return {
     root: null,
     project: {
       format: "comic-reveal-project",
       version: 2,
+      projectId,
       title: game.i18n.localize("CR.Builder.DefaultTitle"),
-      outputFolder: "comics/new-comic",
+      outputFolder: `comics/new-comic-${projectId.slice(0, 6).toLowerCase()}`,
       pages: []
     },
     activePageId: null,
@@ -847,7 +849,7 @@ function startPreviewTransition(state, stepIndex, transition) {
     const eased = 1 - ((1 - progress) ** 3);
     context.clearRect(0, 0, canvas.width, canvas.height);
     context.drawImage(base, 0, 0);
-    drawTransitionFrame(context, delta, transition, eased);
+    drawTransitionFrame(context, delta, transition, eased, regionBounds(resolved.region.points));
     if (progress < 1) state.previewAnimation = requestAnimationFrame(tick);
     else {
       state.previewAnimation = null;
@@ -857,13 +859,37 @@ function startPreviewTransition(state, stepIndex, transition) {
   tick(startedAt);
 }
 
-function drawTransitionFrame(context, delta, transition, progress) {
+function drawTransitionFrame(context, delta, transition, progress, bounds) {
   const width = delta.width;
   const height = delta.height;
+  const regionX = bounds.x * width;
+  const regionY = bounds.y * height;
+  const regionWidth = bounds.width * width;
+  const regionHeight = bounds.height * height;
   let scale = 1;
   let x = 0;
   let y = 0;
   context.save();
+  if (transition === "reveal-ltr") {
+    context.beginPath();
+    context.rect(regionX, regionY, regionWidth * progress, regionHeight);
+    context.clip();
+  }
+  if (transition === "reveal-rtl") {
+    context.beginPath();
+    context.rect(regionX + regionWidth * (1 - progress), regionY, regionWidth * progress, regionHeight);
+    context.clip();
+  }
+  if (transition === "reveal-ttb") {
+    context.beginPath();
+    context.rect(regionX, regionY, regionWidth, regionHeight * progress);
+    context.clip();
+  }
+  if (transition === "reveal-btt") {
+    context.beginPath();
+    context.rect(regionX, regionY + regionHeight * (1 - progress), regionWidth, regionHeight * progress);
+    context.clip();
+  }
   if (transition === "fade") context.globalAlpha = progress;
   if (transition === "blur") {
     context.globalAlpha = 0.15 + 0.85 * progress;
@@ -947,6 +973,7 @@ async function exportProject(state) {
   syncHeaderFields(state);
   const project = normalizeProject(state.project);
   validateProject(project);
+  if (!await confirmOutputOverwrite(project)) return;
   state.exporting = true;
   state.root.classList.add("is-exporting");
 
@@ -999,6 +1026,10 @@ async function exportProject(state) {
       outputPages[outputPages.length - 1].sounds = page.timeline.map((action) => action.sound || null);
       outputPages[outputPages.length - 1].transitions = page.timeline.map((action) => action.transition || "instant");
       outputPages[outputPages.length - 1].durations = page.timeline.map((action) => normalizeDuration(action.duration));
+      outputPages[outputPages.length - 1].overlayRects = page.timeline.map((action) => {
+        const resolved = resolveAction(page, action);
+        return regionBounds(resolved?.region.points);
+      });
     }
 
     const manifest = { ...project, exportedAt: Date.now(), outputs: outputPages };
@@ -1034,10 +1065,31 @@ function normalizeProject(value) {
   return {
     format: "comic-reveal-project",
     version: 2,
+    projectId: String(value.projectId || makeId("project")),
     title: String(value.title ?? ""),
     outputFolder: String(value.outputFolder ?? ""),
     pages
   };
+}
+
+async function confirmOutputOverwrite(project) {
+  let existingPath;
+  try {
+    const result = await getFilePickerClass().browse("data", project.outputFolder, { notify: false });
+    existingPath = (result.files ?? []).find((path) => path.endsWith(`/${PROJECT_FILENAME}`) || path === PROJECT_FILENAME);
+  } catch {
+    return true;
+  }
+  if (!existingPath) return true;
+  try {
+    const response = await fetch(withCacheBuster(existingPath));
+    if (!response.ok) return window.confirm(game.i18n.localize("CR.Builder.OutputOccupiedConfirm"));
+    const existing = await response.json();
+    if (existing?.projectId && existing.projectId === project.projectId) return true;
+    return window.confirm(game.i18n.localize("CR.Builder.OutputOccupiedConfirm"));
+  } catch {
+    return window.confirm(game.i18n.localize("CR.Builder.OutputOccupiedConfirm"));
+  }
 }
 
 function normalizePage(page, pageIndex) {
@@ -1123,6 +1175,20 @@ function normalizeTransform(value) {
 
 function normalizeRotation(value) {
   return ((value + 180) % 360 + 360) % 360 - 180;
+}
+
+function regionBounds(points) {
+  if (!points?.length) return { x: 0, y: 0, width: 1, height: 1 };
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  const x = clamp(Math.min(...xs), 0, 1);
+  const y = clamp(Math.min(...ys), 0, 1);
+  return {
+    x,
+    y,
+    width: Math.max(0, clamp(Math.max(...xs), 0, 1) - x),
+    height: Math.max(0, clamp(Math.max(...ys), 0, 1) - y)
+  };
 }
 
 function normalizeDuration(value) {

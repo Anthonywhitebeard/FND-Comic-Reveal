@@ -6,6 +6,7 @@ import {
   getCurrentDuration,
   getCurrentImage,
   getCurrentOverlay,
+  getCurrentOverlayRect,
   getCurrentSound,
   getCurrentTransition,
   getUpcomingSounds,
@@ -168,16 +169,22 @@ test("transitions stay aligned with naturally sorted frame images", () => {
     id: "transitions",
     pages: [{
       states: ["10.webp", "2.webp", "1.webp"],
-      transitions: ["zoom-in", "slide-left", "blur"],
+      transitions: ["reveal-ltr", "slide-left", "blur"],
       overlays: ["overlay-10.webp", "overlay-2.webp", "overlay-1.webp"],
-      durations: [5000, 800, 0]
+      durations: [5000, 800, 0],
+      overlayRects: [
+        { x: 0.4, y: 0.2, width: 0.5, height: 0.6 },
+        { x: 0.1, y: 0.3, width: 0.25, height: 0.4 },
+        { x: 0, y: 0, width: 1, height: 1 }
+      ]
     }]
   }] });
   const transitionComic = library.comics[0];
-  assert.deepEqual(transitionComic.pages[0].transitions, ["blur", "slide-left", "zoom-in"]);
+  assert.deepEqual(transitionComic.pages[0].transitions, ["blur", "slide-left", "reveal-ltr"]);
   const state = { ...startPresentation(transitionComic), stepIndex: 1 };
   assert.equal(getCurrentTransition(state, transitionComic), "slide-left");
   assert.equal(getCurrentOverlay(state, transitionComic), "overlay-2.webp");
+  assert.deepEqual(getCurrentOverlayRect(state, transitionComic), { x: 0.1, y: 0.3, width: 0.25, height: 0.4 });
   assert.equal(getCurrentDuration(state, transitionComic), 800);
   assert.equal(getCurrentDuration({ ...state, stepIndex: 2 }, transitionComic), 5000);
   assert.deepEqual(getUpcomingOverlays({ ...state, stepIndex: 0 }, transitionComic), ["overlay-2.webp", "overlay-10.webp"]);

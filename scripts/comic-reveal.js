@@ -4,6 +4,7 @@ import {
   getCurrentImage,
   getCurrentDuration,
   getCurrentOverlay,
+  getCurrentOverlayRect,
   getCurrentSound,
   getCurrentTransition,
   getUpcomingImages,
@@ -333,7 +334,8 @@ async function scanComicFolder(folder, title, id) {
             sounds: Array.isArray(page?.sounds) ? page.sounds.map((sound) => sound || null) : [],
             transitions: Array.isArray(page?.transitions) ? page.transitions : [],
             overlays: imageFiles(page?.overlays),
-            durations: Array.isArray(page?.durations) ? page.durations : []
+            durations: Array.isArray(page?.durations) ? page.durations : [],
+            overlayRects: Array.isArray(page?.overlayRects) ? page.overlayRects : []
           }))
           .filter((page) => page.states.length);
         if (pages.length) return { id, title: title || project.title, folder, pages };
@@ -521,6 +523,7 @@ function applyPresentation(value, { playSound = true } = {}) {
     overlay,
     getCurrentImage(incoming, comic),
     getCurrentOverlay(incoming, comic),
+    getCurrentOverlayRect(incoming, comic),
     getCurrentTransition(incoming, comic),
     incoming.revision,
     transitionDuration
@@ -593,7 +596,7 @@ function ensureOverlay() {
   return overlay;
 }
 
-async function renderPresentationImage(overlay, path, overlayPath, transition, revision, duration) {
+async function renderPresentationImage(overlay, path, overlayPath, overlayRect, transition, revision, duration) {
   const sequence = ++renderSequence;
   const stage = overlay.querySelector("[data-cr-stage]");
   if (!path) {
@@ -621,6 +624,10 @@ async function renderPresentationImage(overlay, path, overlayPath, transition, r
 
   effect.className = `cr-image cr-transition-${transition}`;
   effect.alt = "";
+  effect.style.setProperty("--cr-reveal-top", `${overlayRect.y * 100}%`);
+  effect.style.setProperty("--cr-reveal-right", `${Math.max(0, 1 - overlayRect.x - overlayRect.width) * 100}%`);
+  effect.style.setProperty("--cr-reveal-bottom", `${Math.max(0, 1 - overlayRect.y - overlayRect.height) * 100}%`);
+  effect.style.setProperty("--cr-reveal-left", `${overlayRect.x * 100}%`);
   stage.appendChild(effect);
   requestAnimationFrame(() => requestAnimationFrame(() => effect.classList.add("is-active")));
   setTimeout(() => {

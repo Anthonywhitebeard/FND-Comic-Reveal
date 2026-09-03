@@ -43,13 +43,15 @@ function normalizePage(value, index) {
   const transitions = Array.isArray(value?.transitions) ? value.transitions : [];
   const overlays = Array.isArray(value?.overlays) ? value.overlays : [];
   const durations = Array.isArray(value?.durations) ? value.durations : [];
+  const overlayRects = Array.isArray(value?.overlayRects) ? value.overlayRects : [];
   const entries = (Array.isArray(value?.states) ? value.states : [])
     .map((state, stateIndex) => ({
       state: String(state),
       sound: sounds[stateIndex] ? String(sounds[stateIndex]) : null,
       transition: normalizeTransition(transitions[stateIndex]),
       overlay: overlays[stateIndex] ? String(overlays[stateIndex]) : null,
-      duration: normalizeDuration(durations[stateIndex])
+      duration: normalizeDuration(durations[stateIndex]),
+      overlayRect: normalizeRect(overlayRects[stateIndex])
     }))
     .filter((entry) => entry.state)
     .sort((left, right) => naturalCompare(left.state, right.state));
@@ -60,7 +62,8 @@ function normalizePage(value, index) {
     sounds: entries.map((entry) => entry.sound),
     transitions: entries.map((entry) => entry.transition),
     overlays: entries.map((entry) => entry.overlay),
-    durations: entries.map((entry) => entry.duration)
+    durations: entries.map((entry) => entry.duration),
+    overlayRects: entries.map((entry) => entry.overlayRect)
   };
 }
 
@@ -159,6 +162,12 @@ export function getCurrentDuration(state, comic, fallback = 600) {
   return comic.pages[current.pageIndex]?.durations?.[current.stepIndex] ?? clampDuration(fallback);
 }
 
+export function getCurrentOverlayRect(state, comic) {
+  const current = normalizePresentation(state);
+  if (!current.open || !comic?.pages?.length || current.stepIndex < 0) return normalizeRect(null);
+  return normalizeRect(comic.pages[current.pageIndex]?.overlayRects?.[current.stepIndex]);
+}
+
 export function getUpcomingImages(state, comic, count = 2) {
   const current = normalizePresentation(state);
   if (!current.open || !comic?.pages?.length) return [];
@@ -238,7 +247,7 @@ function clamp(value, minimum, maximum) {
 }
 
 function normalizeTransition(value) {
-  const transitions = new Set(["instant", "fade", "blur", "dark", "slide-left", "slide-right", "slide-top", "slide-bottom", "zoom-in", "zoom-out"]);
+  const transitions = new Set(["instant", "fade", "blur", "dark", "slide-left", "slide-right", "slide-top", "slide-bottom", "zoom-in", "zoom-out", "reveal-ltr", "reveal-rtl", "reveal-ttb", "reveal-btt"]);
   return transitions.has(value) ? value : "instant";
 }
 
@@ -249,4 +258,15 @@ function normalizeDuration(value) {
 
 function clampDuration(value) {
   return Math.round(clamp(Number(value) || 0, 0, 5000) / 100) * 100;
+}
+
+function normalizeRect(value) {
+  const x = clamp(Number(value?.x) || 0, 0, 1);
+  const y = clamp(Number(value?.y) || 0, 0, 1);
+  return {
+    x,
+    y,
+    width: clamp(Number(value?.width) || 1, 0, 1 - x),
+    height: clamp(Number(value?.height) || 1, 0, 1 - y)
+  };
 }
