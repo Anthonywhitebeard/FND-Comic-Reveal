@@ -10,7 +10,13 @@ Comic Reveal is a Foundry VTT v14 module for creating and presenting cinematic c
 
 ## Install
 
-Copy the `comic-reveal` folder into Foundry's `Data/modules` directory, restart Foundry, and enable **Comic Reveal** in the world.
+In Foundry's **Add-on Modules** setup screen, click **Install Module** and paste this manifest URL:
+
+```text
+https://github.com/Anthonywhitebeard/FND-Comic-Reveal/releases/latest/download/module.json
+```
+
+Alternatively, download `comic-reveal.zip` from the latest GitHub release and extract the `comic-reveal` folder into Foundry's `Data/modules` directory. Restart Foundry and enable **Comic Reveal** in the world.
 
 ## Prepare a comic
 
