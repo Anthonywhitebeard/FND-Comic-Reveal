@@ -6,7 +6,7 @@ Comic Reveal is a Foundry VTT v14 module for creating and presenting cinematic c
 <img width="2552" height="1401" alt="image" src="https://github.com/user-attachments/assets/1ee8cce5-6597-4b03-a008-72af30daeeae" />
 
 ### Editor
-<img width="2557" height="1407" alt="image" src="https://github.com/user-attachments/assets/f4598922-1acd-4e2f-889c-5565bbd38a68" />
+<img width="2227" height="1091" alt="image" src="https://github.com/user-attachments/assets/b6c81207-3420-4fac-90b6-9a28f8a88773" />
 
 ## Install
 
