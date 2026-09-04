@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   advancePresentation,
+  getActiveAudioTracks,
   getCurrentDuration,
   getCurrentImage,
   getCurrentOverlay,
@@ -114,8 +115,34 @@ test("constructor keeps a global reveal timeline across image layers", () => {
   });
   assert.deepEqual(project.pages[0].timeline, [
     { layerId: "base", regionId: "a", sound: null, transition: "instant", duration: 600 },
-    { layerId: "overlay", regionId: "b", sound: "sounds/impact.ogg", transition: "instant", duration: 600 }
+    { layerId: "overlay", regionId: "b", sound: null, transition: "instant", duration: 600 }
   ]);
+  assert.deepEqual(project.pages[0].audioTracks, [{
+    id: "audio-1",
+    source: "sounds/impact.ogg",
+    start: 1,
+    end: 1
+  }]);
+});
+
+test("overlapping audio tracks stay active across their frame ranges", () => {
+  const library = normalizeLibrary({ comics: [{
+    id: "tracks",
+    pages: [{
+      states: ["1.webp", "2.webp", "3.webp"],
+      audioTracks: [
+        { id: "ambience", source: "ambience.ogg", start: 0, end: 2 },
+        { id: "impact", source: "impact.ogg", start: 1, end: 1 }
+      ]
+    }]
+  }] });
+  const audioComic = library.comics[0];
+  const first = { ...startPresentation(audioComic), stepIndex: 0 };
+  const second = { ...first, stepIndex: 1 };
+  const third = { ...first, stepIndex: 2 };
+  assert.deepEqual(getActiveAudioTracks(first, audioComic).map((track) => track.id), ["ambience"]);
+  assert.deepEqual(getActiveAudioTracks(second, audioComic).map((track) => track.id), ["ambience", "impact"]);
+  assert.deepEqual(getActiveAudioTracks(third, audioComic).map((track) => track.id), ["ambience"]);
 });
 
 test("constructor preserves layer transforms and frame transitions", () => {

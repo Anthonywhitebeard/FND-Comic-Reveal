@@ -1,15 +1,14 @@
 import {
   EMPTY_PRESENTATION,
   advancePresentation,
+  getActiveAudioTracks,
   getCurrentImage,
   getCurrentDuration,
   getCurrentOverlay,
   getCurrentOverlayRect,
-  getCurrentSound,
   getCurrentTransition,
   getUpcomingImages,
   getUpcomingOverlays,
-  getUpcomingSounds,
   naturalCompare,
   normalizeLibrary,
   normalizePresentation,
@@ -29,7 +28,7 @@ let managerDialog = null;
 let currentState = { ...EMPTY_PRESENTATION };
 let stateMutationPending = false;
 let renderSequence = 0;
-let lastSoundRevision = 0;
+const activeAudioTracks = new Map();
 
 Hooks.once("init", () => {
   game.settings.register(MODULE_ID, LIBRARY_SETTING, {
@@ -335,7 +334,8 @@ async function scanComicFolder(folder, title, id) {
             transitions: Array.isArray(page?.transitions) ? page.transitions : [],
             overlays: imageFiles(page?.overlays),
             durations: Array.isArray(page?.durations) ? page.durations : [],
-            overlayRects: Array.isArray(page?.overlayRects) ? page.overlayRects : []
+            overlayRects: Array.isArray(page?.overlayRects) ? page.overlayRects : [],
+            audioTracks: Array.isArray(page?.audioTracks) ? page.audioTracks : []
           }))
           .filter((page) => page.states.length);
         if (pages.length) return { id, title: title || project.title, folder, pages };
@@ -413,6 +413,7 @@ function projectFromImageSequence(comic) {
         id: foundry.utils.randomID(),
         name: page.name || game.i18n.format("CR.Builder.PageName", { number: pageIndex + 1 }),
         layers,
+        audioTracks: (page.audioTracks ?? []).map((track) => ({ ...track })),
         timeline: layers.map((layer, stateIndex) => ({
           layerId: layer.id,
           regionId: layer.regions[0].id,
@@ -497,17 +498,17 @@ function applyPresentation(value, { playSound = true } = {}) {
     incoming.pageIndex !== previous.pageIndex ||
     incoming.stepIndex !== previous.stepIndex
   );
-  const shouldPlaySound = playSound && changedStep && incoming.revision > lastSoundRevision;
   currentState = incoming;
-  lastSoundRevision = Math.max(lastSoundRevision, incoming.revision);
 
   if (!incoming.open) {
+    stopAllAudioTracks();
     removeOverlay();
     return;
   }
 
   const comic = getComic(incoming.comicId);
   if (!comic) {
+    stopAllAudioTracks();
     removeOverlay();
     return;
   }
@@ -530,19 +531,42 @@ function applyPresentation(value, { playSound = true } = {}) {
   );
   preloadImages(getUpcomingImages(incoming, comic));
   preloadImages(getUpcomingOverlays(incoming, comic));
-  preloadSounds(getUpcomingSounds(incoming, comic));
-  if (shouldPlaySound) playFrameSound(getCurrentSound(incoming, comic));
+  const pageTracks = comic.pages[incoming.pageIndex]?.audioTracks ?? [];
+  preloadSounds(pageTracks.map((track) => track.source));
+  syncAudioTracks(incoming, comic, { allowStart: playSound && changedStep });
 }
 
-function playFrameSound(src) {
-  if (!src) return;
-  foundry.audio.AudioHelper.play({
-    src,
-    volume: Number(game.settings.get(MODULE_ID, "effectVolume")),
-    loop: false,
-    autoplay: true,
-    channel: "interface"
-  }, false);
+function syncAudioTracks(state, comic, { allowStart = true } = {}) {
+  const desired = new Map(getActiveAudioTracks(state, comic).map((track) => [`${comic.id}:${state.pageIndex}:${track.id}`, track]));
+  for (const [key, entry] of activeAudioTracks) {
+    if (!desired.has(key)) stopAudioTrack(key, entry);
+  }
+  if (!allowStart) return;
+  for (const [key, track] of desired) {
+    if (activeAudioTracks.has(key)) continue;
+    const entry = { sound: null, cancelled: false };
+    activeAudioTracks.set(key, entry);
+    Promise.resolve(foundry.audio.AudioHelper.play({
+      src: track.source,
+      volume: Number(game.settings.get(MODULE_ID, "effectVolume")),
+      loop: false,
+      autoplay: true,
+      channel: "interface"
+    }, false)).then((sound) => {
+      entry.sound = sound;
+      if (entry.cancelled) sound?.stop?.();
+    }).catch(() => activeAudioTracks.delete(key));
+  }
+}
+
+function stopAudioTrack(key, entry) {
+  activeAudioTracks.delete(key);
+  entry.cancelled = true;
+  entry.sound?.stop?.();
+}
+
+function stopAllAudioTracks() {
+  for (const [key, entry] of activeAudioTracks) stopAudioTrack(key, entry);
 }
 
 function preloadSounds(paths) {

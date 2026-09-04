@@ -2,6 +2,7 @@ const MODULE_ID = "comic-reveal";
 const PROJECT_FILENAME = "comic-reveal-project.json";
 const COLORS = ["#55d6ff", "#ffcf56", "#ff6b9d", "#7cff6b", "#c69cff", "#ff8c42"];
 const TRANSITIONS = ["instant", "fade", "blur", "dark", "slide-left", "slide-right", "slide-top", "slide-bottom", "zoom-in", "zoom-out", "reveal-ltr", "reveal-rtl", "reveal-ttb", "reveal-btt"];
+const AUDIO_EXTENSIONS = [".aac", ".flac", ".m4a", ".mp3", ".oga", ".ogg", ".opus", ".wav", ".webm"];
 
 let builder = null;
 
@@ -47,6 +48,7 @@ function createBuilderState(onExport) {
     draggedLayerId: null,
     transformDrag: null,
     previewAnimation: null,
+    audioResize: null,
     onExport
   };
 }
@@ -108,6 +110,9 @@ function createBuilderElement() {
         <div class="cr-builder-section-title">${text("CR.Builder.RevealOrder")}</div>
         <p>${text("CR.Builder.DrawHint")}</p>
         <div data-builder-regions></div>
+        <div class="cr-builder-section-title">${text("CR.Builder.SoundMap")}</div>
+        <p>${text("CR.Builder.SoundMapHint")}</p>
+        <div data-builder-audio-map></div>
       </aside>
     </div>
     <footer class="cr-builder-status" data-builder-status>${text("CR.Builder.Ready")}</footer>
@@ -120,9 +125,16 @@ function bindBuilder(state) {
   state.root.addEventListener("dragstart", (event) => onLayerDragStart(state, event));
   state.root.addEventListener("dragover", (event) => onLayerDragOver(state, event));
   state.root.addEventListener("drop", (event) => onLayerDrop(state, event));
+  state.root.addEventListener("dragover", (event) => onAudioDragOver(state, event));
+  state.root.addEventListener("dragleave", (event) => onAudioDragLeave(state, event));
+  state.root.addEventListener("drop", (event) => onAudioDrop(state, event));
   state.root.addEventListener("dragend", () => clearLayerDragState(state));
   state.root.addEventListener("change", (event) => onBuilderChange(state, event));
   state.root.addEventListener("input", (event) => onBuilderChange(state, event));
+  state.root.addEventListener("pointerdown", (event) => onAudioResizeStart(state, event));
+  state.root.addEventListener("pointermove", (event) => onAudioResizeMove(state, event));
+  state.root.addEventListener("pointerup", (event) => onAudioResizeEnd(state, event));
+  state.root.addEventListener("pointercancel", (event) => onAudioResizeEnd(state, event));
   state.root.querySelector("[name='projectTitle']").addEventListener("input", (event) => {
     state.project.title = event.target.value;
     state.dirty = true;
@@ -222,6 +234,9 @@ async function onBuilderClick(state, event) {
     if (action === "sound-select") return chooseRegionSound(state, regionIndex);
     if (action === "sound-preview") return previewRegionSound(state, regionIndex);
     if (action === "sound-clear") return clearRegionSound(state, regionIndex);
+    if (action === "add-audio-at-frame") return chooseAudioForFrame(state, Number(button.dataset.frameIndex));
+    if (action === "audio-preview") return previewAudioTrack(state, button.closest("[data-audio-track-id]")?.dataset.audioTrackId);
+    if (action === "audio-delete") return deleteAudioTrack(state, button.closest("[data-audio-track-id]")?.dataset.audioTrackId);
   } catch (error) {
     console.error(`${MODULE_ID} | Builder`, error);
     ui.notifications.error(error?.message || game.i18n.localize("CR.Errors.Unknown"));
@@ -235,7 +250,8 @@ function addEmptyPage(state) {
     id: foundry.utils.randomID(),
     name: game.i18n.format("CR.Builder.PageName", { number: state.project.pages.length + 1 }),
     layers: [layer],
-    timeline: []
+    timeline: [],
+    audioTracks: []
   };
   state.project.pages.push(page);
   state.activePageId = page.id;
@@ -486,8 +502,10 @@ async function deleteLayer(state, layerId) {
   const page = activePage(state);
   const layer = page?.layers.find((entry) => entry.id === layerId);
   if (!page || !layer || !window.confirm(game.i18n.format("CR.Builder.DeleteLayerConfirm", { name: layer.name }))) return;
+  const removedFrames = page.timeline.map((entry, index) => entry.layerId === layerId ? index : -1).filter((index) => index >= 0).reverse();
   page.layers = page.layers.filter((entry) => entry.id !== layerId);
   page.timeline = page.timeline.filter((entry) => entry.layerId !== layerId);
+  for (const index of removedFrames) removeFrameFromAudioTracks(page, index);
   if (!page.layers.length) page.layers.push(createLayer(1));
   state.activeLayerId = page.layers[0].id;
   state.previewStep = null;
@@ -624,6 +642,7 @@ function deleteRegion(state, index) {
   const action = page?.timeline[index];
   if (!page || !action) return;
   page.timeline.splice(index, 1);
+  removeFrameFromAudioTracks(page, index);
   const layer = page.layers.find((entry) => entry.id === action.layerId);
   if (layer) layer.regions = layer.regions.filter((region) => region.id !== action.regionId);
   state.dirty = true;
@@ -745,10 +764,9 @@ function refreshBuilder(state) {
   state.root.querySelector("[data-builder-regions]").innerHTML = page?.timeline.length
     ? page.timeline.map((action, index) => {
       const resolved = resolveAction(page, action);
-      const soundLabel = action.sound ? fileName(action.sound) : game.i18n.localize("CR.Builder.NoSound");
       const transitionOptions = TRANSITIONS.map((transition) => `<option value="${transition}" ${action.transition === transition ? "selected" : ""}>${text(`CR.Transition.${transition}`)}</option>`).join("");
       return `
-      <article class="cr-builder-region" data-region-index="${index}">
+      <article class="cr-builder-region" data-region-index="${index}" data-audio-frame-index="${index}">
         <span style="--region-color:${COLORS[index % COLORS.length]}">${index + 1}</span>
         <strong>${escapeHtml(resolved?.layer.name ?? game.i18n.format("CR.Builder.Region", { number: index + 1 }))}</strong>
         <button type="button" data-builder-action="region-up" ${index === 0 ? "disabled" : ""}><i class="fa-solid fa-arrow-up"></i></button>
@@ -756,15 +774,11 @@ function refreshBuilder(state) {
         <button type="button" data-builder-action="region-delete"><i class="fa-solid fa-trash"></i></button>
         <label class="cr-region-transition"><i class="fa-solid fa-wand-magic-sparkles"></i><select data-transition-index="${index}" title="${attr("CR.Builder.Transition")}">${transitionOptions}</select></label>
         <label class="cr-region-duration" title="${attr("CR.Builder.TransitionDuration")}"><i class="fa-solid fa-gauge-high"></i><input type="range" min="0" max="5000" step="100" value="${action.duration}" data-duration-index="${index}"><output>${formatDuration(action.duration)}</output></label>
-        <div class="cr-region-sound ${action.sound ? "has-sound" : ""}">
-          <button type="button" data-builder-action="sound-select" title="${attr("CR.Builder.ChooseSound")}"><i class="fa-solid fa-music"></i><span>${escapeHtml(soundLabel)}</span></button>
-          <button type="button" data-builder-action="sound-preview" title="${attr("CR.Builder.PreviewSound")}" ${action.sound ? "" : "disabled"}><i class="fa-solid fa-volume-high"></i></button>
-          <button type="button" data-builder-action="sound-clear" title="${attr("CR.Builder.ClearSound")}" ${action.sound ? "" : "disabled"}><i class="fa-solid fa-volume-xmark"></i></button>
-        </div>
       </article>
     `;
     }).join("")
     : `<p class="cr-builder-no-regions">${text("CR.Builder.NoRegions")}</p>`;
+  state.root.querySelector("[data-builder-audio-map]").innerHTML = buildAudioMap(page);
 
   const hasCanvasImage = state.previewStep === null ? Boolean(state.image) : Boolean(state.baseImage);
   state.root.querySelector("[data-builder-empty]").hidden = hasCanvasImage;
@@ -1024,6 +1038,7 @@ async function exportProject(state) {
       }
       outputPages.push({ name: page.name, states, overlays });
       outputPages[outputPages.length - 1].sounds = page.timeline.map((action) => action.sound || null);
+      outputPages[outputPages.length - 1].audioTracks = page.audioTracks.map((track) => ({ ...track }));
       outputPages[outputPages.length - 1].transitions = page.timeline.map((action) => action.transition || "instant");
       outputPages[outputPages.length - 1].durations = page.timeline.map((action) => normalizeDuration(action.duration));
       outputPages[outputPages.length - 1].overlayRects = page.timeline.map((action) => {
@@ -1070,6 +1085,158 @@ function normalizeProject(value) {
     outputFolder: String(value.outputFolder ?? ""),
     pages
   };
+}
+
+function removeFrameFromAudioTracks(page, index) {
+  page.audioTracks = (page.audioTracks ?? []).flatMap((track) => {
+    if (track.start > index) return [{ ...track, start: track.start - 1, end: track.end - 1 }];
+    if (track.end < index) return [track];
+    const shortened = { ...track, end: track.end - 1 };
+    return shortened.end >= shortened.start ? [shortened] : [];
+  });
+}
+
+function buildAudioMap(page) {
+  const frameCount = page?.timeline.length ?? 0;
+  if (!frameCount) return `<p class="cr-builder-no-regions">${text("CR.Builder.SoundMapEmpty")}</p>`;
+  const columns = `7.5rem repeat(${frameCount}, minmax(2.2rem, 1fr))`;
+  const frames = page.timeline.map((_action, index) => `
+    <button type="button" class="cr-audio-frame-cell" data-builder-action="add-audio-at-frame" data-frame-index="${index}" data-audio-frame-index="${index}" title="${attr("CR.Builder.AddSoundAtFrame")}">${index + 1}</button>
+  `).join("");
+  const tracks = (page.audioTracks ?? []).map((track) => `
+    <div class="cr-audio-track-row" data-audio-track-id="${escapeHtml(track.id)}">
+      <span class="cr-audio-track-label" title="${escapeHtml(track.source)}"><i class="fa-solid fa-music"></i>${escapeHtml(fileName(track.source))}</span>
+      <div class="cr-audio-track-bar" style="grid-column:${track.start + 2} / ${track.end + 3}">
+        <button type="button" class="cr-audio-resize" data-audio-resize="start" title="${attr("CR.Builder.ResizeSoundStart")}"></button>
+        <button type="button" data-builder-action="audio-preview" title="${attr("CR.Builder.PreviewSound")}"><i class="fa-solid fa-play"></i></button>
+        <span>${track.start + 1}–${track.end + 1}</span>
+        <button type="button" data-builder-action="audio-delete" title="${attr("CR.Builder.ClearSound")}"><i class="fa-solid fa-trash"></i></button>
+        <button type="button" class="cr-audio-resize" data-audio-resize="end" title="${attr("CR.Builder.ResizeSoundEnd")}"></button>
+      </div>
+    </div>
+  `).join("");
+  return `<div class="cr-audio-map-scroll"><div class="cr-audio-grid" style="grid-template-columns:${columns}"><span></span>${frames}${tracks}</div></div>`;
+}
+
+function chooseAudioForFrame(state, frameIndex) {
+  if (!activePage(state)?.timeline[frameIndex]) return;
+  openPicker("audio", "", (path) => addAudioTrack(state, path, frameIndex));
+}
+
+function addAudioTrack(state, source, frameIndex) {
+  const page = activePage(state);
+  if (!page || !source || !page.timeline[frameIndex]) return;
+  page.audioTracks ??= [];
+  page.audioTracks.push({
+    id: foundry.utils.randomID(),
+    source: String(source),
+    start: frameIndex,
+    end: frameIndex
+  });
+  state.dirty = true;
+  refreshBuilder(state);
+}
+
+function previewAudioTrack(state, trackId) {
+  const track = activePage(state)?.audioTracks?.find((entry) => entry.id === trackId);
+  if (!track?.source) return;
+  foundry.audio.AudioHelper.play({
+    src: track.source,
+    volume: Number(game.settings.get(MODULE_ID, "effectVolume")),
+    loop: false,
+    autoplay: true,
+    channel: "interface"
+  }, false);
+}
+
+function deleteAudioTrack(state, trackId) {
+  const page = activePage(state);
+  if (!page?.audioTracks?.some((entry) => entry.id === trackId)) return;
+  page.audioTracks = page.audioTracks.filter((entry) => entry.id !== trackId);
+  state.dirty = true;
+  refreshBuilder(state);
+}
+
+function onAudioDragOver(state, event) {
+  if (![...(event.dataTransfer?.items ?? [])].some((item) => item.kind === "file") && !clipboardAudio(event.dataTransfer)) return;
+  const target = event.target.closest?.("[data-audio-frame-index]");
+  if (!target) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "copy";
+  target.classList.add("is-audio-drop-target");
+}
+
+function onAudioDragLeave(_state, event) {
+  event.target.closest?.("[data-audio-frame-index]")?.classList.remove("is-audio-drop-target");
+}
+
+async function onAudioDrop(state, event) {
+  const target = event.target.closest?.("[data-audio-frame-index]");
+  const file = clipboardAudio(event.dataTransfer);
+  if (!target || !file) return;
+  event.preventDefault();
+  event.stopPropagation();
+  target.classList.remove("is-audio-drop-target");
+  try {
+    syncHeaderFields(state);
+    if (!state.project.outputFolder) throw new Error(game.i18n.localize("CR.Builder.OutputRequiredForAudio"));
+    if (!await confirmOutputOverwrite(normalizeProject(state.project))) return;
+    const folder = `${state.project.outputFolder}/sounds`;
+    await ensureDirectoryTree(folder);
+    const extension = file.name.includes(".") ? `.${file.name.split(".").at(-1).toLowerCase()}` : ".ogg";
+    const safeName = file.name.replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "sound";
+    const filename = `${safeName}-${foundry.utils.randomID().slice(0, 6).toLowerCase()}${extension}`;
+    setStatus(state, game.i18n.localize("CR.Builder.AudioUploading"));
+    const path = await uploadFile(folder, new File([file], filename, { type: file.type || "audio/ogg" }));
+    addAudioTrack(state, path, Number(target.dataset.audioFrameIndex));
+    setStatus(state, game.i18n.localize("CR.Builder.AudioUploadComplete"));
+  } catch (error) {
+    reportBuilderError(state, error);
+  }
+}
+
+function clipboardAudio(dataTransfer) {
+  for (const file of dataTransfer?.files ?? []) {
+    const extension = `.${String(file.name).split(".").at(-1).toLowerCase()}`;
+    if (file.type?.startsWith("audio/") || AUDIO_EXTENSIONS.includes(extension)) return file;
+  }
+  return null;
+}
+
+function onAudioResizeStart(state, event) {
+  const handle = event.target.closest?.("[data-audio-resize]");
+  if (!handle || event.button !== 0) return;
+  const trackId = handle.closest("[data-audio-track-id]")?.dataset.audioTrackId;
+  const track = activePage(state)?.audioTracks?.find((entry) => entry.id === trackId);
+  if (!track) return;
+  event.preventDefault();
+  event.stopPropagation();
+  state.audioResize = { trackId, edge: handle.dataset.audioResize, pointerId: event.pointerId };
+  handle.setPointerCapture?.(event.pointerId);
+}
+
+function onAudioResizeMove(state, event) {
+  if (!state.audioResize || state.audioResize.pointerId !== event.pointerId) return;
+  const page = activePage(state);
+  const track = page?.audioTracks?.find((entry) => entry.id === state.audioResize.trackId);
+  const cells = [...state.root.querySelectorAll(".cr-audio-frame-cell")];
+  if (!track || !cells.length) return;
+  const frameIndex = cells.reduce((best, cell, index) => {
+    const rect = cell.getBoundingClientRect();
+    const distance = Math.abs(event.clientX - (rect.left + rect.width / 2));
+    return distance < best.distance ? { index, distance } : best;
+  }, { index: 0, distance: Infinity }).index;
+  if (state.audioResize.edge === "start") track.start = Math.min(frameIndex, track.end);
+  else track.end = Math.max(frameIndex, track.start);
+  const bar = state.root.querySelector(`[data-audio-track-id="${CSS.escape(track.id)}"] .cr-audio-track-bar`);
+  if (bar) bar.style.gridColumn = `${track.start + 2} / ${track.end + 3}`;
+  state.dirty = true;
+}
+
+function onAudioResizeEnd(state, event) {
+  if (!state.audioResize || state.audioResize.pointerId !== event.pointerId) return;
+  state.audioResize = null;
+  refreshBuilder(state);
 }
 
 async function confirmOutputOverwrite(project) {
@@ -1135,12 +1302,37 @@ function normalizePage(page, pageIndex) {
       if (!knownRegionIds.has(key)) validActions.push({ layerId: layer.id, regionId: region.id, sound: null, transition: "instant", duration: 600 });
     }
   }
+  let audioTracks = (Array.isArray(page.audioTracks) ? page.audioTracks : [])
+    .map((track, index) => normalizeAudioTrack(track, index, validActions.length))
+    .filter(Boolean);
+  if (!audioTracks.length) {
+    audioTracks = validActions.flatMap((action, index) => action.sound ? [{
+      id: makeId(`audio-${index}`),
+      source: action.sound,
+      start: index,
+      end: index
+    }] : []);
+  }
+  for (const action of validActions) action.sound = null;
 
   return {
     id: pageId,
     name: String(page.name || `Page ${pageIndex + 1}`),
     layers,
-    timeline: validActions
+    timeline: validActions,
+    audioTracks
+  };
+}
+
+function normalizeAudioTrack(track, index, frameCount) {
+  if (!track?.source || frameCount < 1) return null;
+  const start = clamp(Math.trunc(Number(track.start) || 0), 0, frameCount - 1);
+  const end = clamp(Math.trunc(Number(track.end) || start), start, frameCount - 1);
+  return {
+    id: String(track.id || makeId(`audio-${index}`)),
+    source: String(track.source),
+    start,
+    end
   };
 }
 

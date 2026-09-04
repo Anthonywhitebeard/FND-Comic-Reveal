@@ -51,9 +51,9 @@ The constructor previews these effects when advancing with the Preview controls.
 
 ### Sound effects
 
-Every entry in the reveal-order sidebar has sound controls. Use the music-note button to choose an audio file, the speaker button to preview it locally, and the muted-speaker button to remove it. When that reveal is reached during presentation, the effect plays once on every connected client. Moving a reveal also moves its attached sound.
+The sound map below the reveal order contains independent audio tracks. Click a frame number to choose an existing Foundry audio asset, or drag an audio file from Explorer directly onto a frame. Dropped files are copied into the project's `sounds` folder and attached immediately.
 
-Sound does not replay merely because a player reconnects or reloads while a frame is already visible. Moving backward or forward onto the frame again does play it. The default effect volume can be changed in the module settings; each user's Foundry interface-volume control still applies.
+Drag either edge of a track to extend or shorten it across adjacent frames. Playback starts when the track becomes active, continues while advancing through its complete frame range, and stops after leaving that range. Multiple overlapping tracks play simultaneously. The default effect volume can be changed in the module settings; each user's Foundry interface-volume control still applies.
 
 The constructor creates cumulative WebP states in `page-01`, `page-02`, and so on. It also saves `comic-reveal-project.json` in the output folder. Use **Open project** later and select that file to edit the original page sources and outlines. Rebuilding updates the library automatically. Old surplus image files are ignored because playback follows the saved project manifest.
 

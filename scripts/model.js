@@ -55,6 +55,14 @@ function normalizePage(value, index) {
     }))
     .filter((entry) => entry.state)
     .sort((left, right) => naturalCompare(left.state, right.state));
+  const audioTracks = (Array.isArray(value?.audioTracks) && value.audioTracks.length
+    ? value.audioTracks.map((track, trackIndex) => normalizeAudioTrack(track, trackIndex, entries.length)).filter(Boolean)
+    : entries.flatMap((entry, stateIndex) => entry.sound ? [{
+      id: `legacy-${stateIndex}`,
+      source: entry.sound,
+      start: stateIndex,
+      end: stateIndex
+    }] : []));
 
   return {
     name: String(value?.name || `Page ${index + 1}`),
@@ -63,7 +71,8 @@ function normalizePage(value, index) {
     transitions: entries.map((entry) => entry.transition),
     overlays: entries.map((entry) => entry.overlay),
     durations: entries.map((entry) => entry.duration),
-    overlayRects: entries.map((entry) => entry.overlayRect)
+    overlayRects: entries.map((entry) => entry.overlayRect),
+    audioTracks
   };
 }
 
@@ -160,6 +169,13 @@ export function getCurrentDuration(state, comic, fallback = 600) {
   const current = normalizePresentation(state);
   if (!current.open || !comic?.pages?.length || current.stepIndex < 0) return clampDuration(fallback);
   return comic.pages[current.pageIndex]?.durations?.[current.stepIndex] ?? clampDuration(fallback);
+}
+
+export function getActiveAudioTracks(state, comic) {
+  const current = normalizePresentation(state);
+  const page = current.open ? comic?.pages?.[current.pageIndex] : null;
+  if (!page || current.stepIndex < 0) return [];
+  return (page.audioTracks ?? []).filter((track) => track.start <= current.stepIndex && track.end >= current.stepIndex);
 }
 
 export function getCurrentOverlayRect(state, comic) {
@@ -268,5 +284,17 @@ function normalizeRect(value) {
     y,
     width: clamp(Number(value?.width) || 1, 0, 1 - x),
     height: clamp(Number(value?.height) || 1, 0, 1 - y)
+  };
+}
+
+function normalizeAudioTrack(track, index, frameCount) {
+  if (!track?.source || frameCount < 1) return null;
+  const start = clamp(Math.trunc(Number(track.start) || 0), 0, frameCount - 1);
+  const endValue = Number.isFinite(Number(track.end)) ? Math.trunc(Number(track.end)) : start;
+  return {
+    id: String(track.id || `track-${index}`),
+    source: String(track.source),
+    start,
+    end: clamp(endValue, start, frameCount - 1)
   };
 }
