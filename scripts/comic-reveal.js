@@ -338,7 +338,13 @@ async function scanComicFolder(folder, title, id) {
             audioTracks: Array.isArray(page?.audioTracks) ? page.audioTracks : []
           }))
           .filter((page) => page.states.length);
-        if (pages.length) return { id, title: title || project.title, folder, pages };
+        if (pages.length) return {
+          id,
+          title: title || project.title,
+          folder,
+          pages,
+          audioTracks: Array.isArray(project.audioTracks) ? project.audioTracks : []
+        };
       }
     } catch (error) {
       console.warn(`${MODULE_ID} | Could not read builder project`, error);
@@ -361,14 +367,15 @@ async function scanComicFolder(folder, title, id) {
   return { id, title: title || folderName(folder), folder, pages };
 }
 
-async function registerBuilderExport({ title, folder, pages }) {
+async function registerBuilderExport({ title, folder, pages, audioTracks = [] }) {
   const library = getLibrary();
   const existing = library.comics.find((comic) => comic.folder === folder);
   if (existing) {
     existing.title = title;
     existing.pages = pages;
+    existing.audioTracks = audioTracks;
   } else {
-    library.comics.push({ id: foundry.utils.randomID(), title, folder, pages });
+    library.comics.push({ id: foundry.utils.randomID(), title, folder, pages, audioTracks });
   }
   await game.settings.set(MODULE_ID, LIBRARY_SETTING, library);
   ui.notifications.info(game.i18n.format("CR.Notifications.Added", { title }));
@@ -394,6 +401,7 @@ function projectFromImageSequence(comic) {
     version: 2,
     title: comic.title,
     outputFolder: comic.folder,
+    audioTracks: (comic.audioTracks ?? []).map((track) => ({ ...track })),
     pages: comic.pages.map((page, pageIndex) => {
       const layers = page.states.map((source, stateIndex) => {
         const layerId = foundry.utils.randomID();
@@ -413,7 +421,6 @@ function projectFromImageSequence(comic) {
         id: foundry.utils.randomID(),
         name: page.name || game.i18n.format("CR.Builder.PageName", { number: pageIndex + 1 }),
         layers,
-        audioTracks: (page.audioTracks ?? []).map((track) => ({ ...track })),
         timeline: layers.map((layer, stateIndex) => ({
           layerId: layer.id,
           regionId: layer.regions[0].id,
@@ -531,13 +538,12 @@ function applyPresentation(value, { playSound = true } = {}) {
   );
   preloadImages(getUpcomingImages(incoming, comic));
   preloadImages(getUpcomingOverlays(incoming, comic));
-  const pageTracks = comic.pages[incoming.pageIndex]?.audioTracks ?? [];
-  preloadSounds(pageTracks.map((track) => track.source));
+  preloadSounds((comic.audioTracks ?? []).map((track) => track.source));
   syncAudioTracks(incoming, comic, { allowStart: playSound && changedStep });
 }
 
 function syncAudioTracks(state, comic, { allowStart = true } = {}) {
-  const desired = new Map(getActiveAudioTracks(state, comic).map((track) => [`${comic.id}:${state.pageIndex}:${track.id}`, track]));
+  const desired = new Map(getActiveAudioTracks(state, comic).map((track) => [`${comic.id}:${track.id}`, track]));
   for (const [key, entry] of activeAudioTracks) {
     if (!desired.has(key)) stopAudioTrack(key, entry);
   }

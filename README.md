@@ -51,9 +51,9 @@ The constructor previews these effects when advancing with the Preview controls.
 
 ### Sound effects
 
-The sound map below the reveal order contains independent audio tracks. Click a frame number to choose an existing Foundry audio asset, or drag an audio file from Explorer directly onto a frame. Dropped files are copied into the project's `sounds` folder and attached immediately.
+The constructor shows every frame from every page in one continuous list, with clear page separators. Vertical audio tracks sit directly to the right of that list. Use a frame's music button to choose an existing Foundry audio asset, or drag an audio file from Explorer directly onto the frame card. Dropped files receive a unique name, are copied into the project's `sounds` folder, and are attached immediately without triggering the project-overwrite warning.
 
-Drag either edge of a track to extend or shorten it across adjacent frames. Playback starts when the track becomes active, continues while advancing through its complete frame range, and stops after leaving that range. Multiple overlapping tracks play simultaneously. The default effect volume can be changed in the module settings; each user's Foundry interface-volume control still applies.
+Drag the top or bottom edge of a track to extend or shorten it across adjacent frames, including frames on another page. Playback starts when the track becomes active, continues while advancing through its complete frame range, and stops after leaving that range. Multiple overlapping tracks occupy neighboring columns and play simultaneously. The audio file's duration is shown beside its name. The default effect volume can be changed in the module settings; each user's Foundry interface-volume control still applies.
 
 The constructor creates cumulative WebP states in `page-01`, `page-02`, and so on. It also saves `comic-reveal-project.json` in the output folder. Use **Open project** later and select that file to edit the original page sources and outlines. Rebuilding updates the library automatically. Old surplus image files are ignored because playback follows the saved project manifest.
 

@@ -117,7 +117,7 @@ test("constructor keeps a global reveal timeline across image layers", () => {
     { layerId: "base", regionId: "a", sound: null, transition: "instant", duration: 600 },
     { layerId: "overlay", regionId: "b", sound: null, transition: "instant", duration: 600 }
   ]);
-  assert.deepEqual(project.pages[0].audioTracks, [{
+  assert.deepEqual(project.audioTracks, [{
     id: "audio-1",
     source: "sounds/impact.ogg",
     start: 1,
@@ -143,6 +143,24 @@ test("overlapping audio tracks stay active across their frame ranges", () => {
   assert.deepEqual(getActiveAudioTracks(first, audioComic).map((track) => track.id), ["ambience"]);
   assert.deepEqual(getActiveAudioTracks(second, audioComic).map((track) => track.id), ["ambience", "impact"]);
   assert.deepEqual(getActiveAudioTracks(third, audioComic).map((track) => track.id), ["ambience"]);
+});
+
+test("an audio track remains active across a page boundary and its blank step", () => {
+  const library = normalizeLibrary({ comics: [{
+    id: "cross-page",
+    pages: [
+      { states: ["1.webp", "2.webp"] },
+      { states: ["3.webp", "4.webp"] }
+    ],
+    audioTracks: [{ id: "bridge", source: "bridge.ogg", start: 1, end: 2 }]
+  }] });
+  const audioComic = library.comics[0];
+  const lastOnFirstPage = { ...startPresentation(audioComic), pageIndex: 0, stepIndex: 1 };
+  const blankBeforeSecondPage = { ...lastOnFirstPage, pageIndex: 1, stepIndex: -1 };
+  const firstOnSecondPage = { ...lastOnFirstPage, pageIndex: 1, stepIndex: 0 };
+  assert.deepEqual(getActiveAudioTracks(lastOnFirstPage, audioComic).map((track) => track.id), ["bridge"]);
+  assert.deepEqual(getActiveAudioTracks(blankBeforeSecondPage, audioComic).map((track) => track.id), ["bridge"]);
+  assert.deepEqual(getActiveAudioTracks(firstOnSecondPage, audioComic).map((track) => track.id), ["bridge"]);
 });
 
 test("constructor preserves layer transforms and frame transitions", () => {

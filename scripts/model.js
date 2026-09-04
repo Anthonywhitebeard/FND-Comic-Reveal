@@ -29,12 +29,32 @@ export function normalizeComic(value) {
     .filter((page) => page.states.length > 0);
 
   if (!value.id || !pages.length) return null;
+  const totalFrames = pages.reduce((total, page) => total + page.states.length, 0);
+  let audioTracks = (Array.isArray(value.audioTracks) ? value.audioTracks : [])
+    .map((track, index) => normalizeAudioTrack(track, index, totalFrames))
+    .filter(Boolean);
+  if (!audioTracks.length) {
+    let offset = 0;
+    audioTracks = pages.flatMap((page) => {
+      const tracks = page.audioTracks.map((track) => ({ ...track, start: track.start + offset, end: track.end + offset }));
+      offset += page.states.length;
+      return tracks;
+    });
+  }
+  const usedTrackIds = new Set();
+  audioTracks = audioTracks.map((track, index) => {
+    let id = track.id;
+    while (usedTrackIds.has(id)) id = `${track.id}-${index}`;
+    usedTrackIds.add(id);
+    return id === track.id ? track : { ...track, id };
+  });
 
   return {
     id: String(value.id),
     title: String(value.title || "Comic"),
     folder: String(value.folder || ""),
-    pages
+    pages,
+    audioTracks
   };
 }
 
@@ -174,8 +194,14 @@ export function getCurrentDuration(state, comic, fallback = 600) {
 export function getActiveAudioTracks(state, comic) {
   const current = normalizePresentation(state);
   const page = current.open ? comic?.pages?.[current.pageIndex] : null;
-  if (!page || current.stepIndex < 0) return [];
-  return (page.audioTracks ?? []).filter((track) => track.start <= current.stepIndex && track.end >= current.stepIndex);
+  if (!page) return [];
+  const pageOffset = comic.pages.slice(0, current.pageIndex).reduce((total, entry) => total + entry.states.length, 0);
+  if (current.stepIndex < 0) {
+    if (current.pageIndex === 0) return [];
+    return (comic.audioTracks ?? []).filter((track) => track.start < pageOffset && track.end >= pageOffset);
+  }
+  const absoluteIndex = pageOffset + current.stepIndex;
+  return (comic.audioTracks ?? []).filter((track) => track.start <= absoluteIndex && track.end >= absoluteIndex);
 }
 
 export function getCurrentOverlayRect(state, comic) {
@@ -295,6 +321,7 @@ function normalizeAudioTrack(track, index, frameCount) {
     id: String(track.id || `track-${index}`),
     source: String(track.source),
     start,
-    end: clamp(endValue, start, frameCount - 1)
+    end: clamp(endValue, start, frameCount - 1),
+    duration: track.duration !== null && Number.isFinite(Number(track.duration)) ? Number(track.duration) : null
   };
 }
