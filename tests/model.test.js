@@ -18,7 +18,7 @@ import {
   retreatPresentation,
   startPresentation
 } from "../scripts/model.js";
-import { normalizeProject, reorderLayers, simplifyPoints } from "../scripts/comic-builder.js";
+import { assignAudioLanes, normalizeProject, reorderLayers, simplifyPoints } from "../scripts/comic-builder.js";
 
 const comic = {
   id: "comic-1",
@@ -161,6 +161,19 @@ test("an audio track remains active across a page boundary and its blank step", 
   assert.deepEqual(getActiveAudioTracks(lastOnFirstPage, audioComic).map((track) => track.id), ["bridge"]);
   assert.deepEqual(getActiveAudioTracks(blankBeforeSecondPage, audioComic).map((track) => track.id), ["bridge"]);
   assert.deepEqual(getActiveAudioTracks(firstOnSecondPage, audioComic).map((track) => track.id), ["bridge"]);
+});
+
+test("non-overlapping audio tracks reuse the leftmost lane", () => {
+  const lanes = assignAudioLanes([
+    { id: "first", start: 0, end: 0 },
+    { id: "second", start: 2, end: 3 },
+    { id: "overlap", start: 3, end: 4 },
+    { id: "later", start: 5, end: 5 }
+  ]);
+  assert.equal(lanes.get("first"), 0);
+  assert.equal(lanes.get("second"), 0);
+  assert.equal(lanes.get("overlap"), 1);
+  assert.equal(lanes.get("later"), 0);
 });
 
 test("constructor preserves layer transforms and frame transitions", () => {

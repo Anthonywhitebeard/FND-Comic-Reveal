@@ -1155,8 +1155,10 @@ function insertFrameIntoAudioTracks(project, index) {
 
 function buildFrameSoundMap(state, frames) {
   const tracks = state.project.audioTracks ?? [];
-  const columns = tracks.length
-    ? `minmax(15rem, 1fr) repeat(${tracks.length}, minmax(7.5rem, 8.5rem))`
+  const lanes = assignAudioLanes(tracks);
+  const laneCount = lanes.size ? Math.max(...lanes.values()) + 1 : 0;
+  const columns = laneCount
+    ? `minmax(15rem, 1fr) repeat(${laneCount}, minmax(7.5rem, 8.5rem))`
     : "minmax(15rem, 1fr)";
   const frameCards = frames.map((frame) => {
     const resolved = resolveAction(frame.page, frame.action);
@@ -1172,8 +1174,8 @@ function buildFrameSoundMap(state, frames) {
         <label class="cr-region-duration" title="${attr("CR.Builder.TransitionDuration")}"><i class="fa-solid fa-gauge-high"></i><input type="range" min="0" max="5000" step="100" value="${frame.action.duration}" data-duration-index="${frame.localIndex}" data-frame-page-id="${escapeHtml(frame.page.id)}"><output>${formatDuration(frame.action.duration)}</output></label>
       </article>`;
   }).join("");
-  const trackBars = tracks.map((track, trackIndex) => `
-    <article class="cr-audio-track-bar" style="grid-column:${trackIndex + 2};grid-row:${track.start + 1} / ${track.end + 2}" data-audio-track-id="${escapeHtml(track.id)}" title="${escapeHtml(track.source)}">
+  const trackBars = tracks.map((track) => `
+    <article class="cr-audio-track-bar" style="grid-column:${lanes.get(track.id) + 2};grid-row:${track.start + 1} / ${track.end + 2}" data-audio-track-id="${escapeHtml(track.id)}" title="${escapeHtml(track.source)}">
       <button type="button" class="cr-audio-resize" data-audio-resize="start" title="${attr("CR.Builder.ResizeSoundStart")}"></button>
       <div class="cr-audio-track-name"><strong>${escapeHtml(fileName(track.source))}</strong><small>${formatAudioDuration(track.duration)}</small></div>
       <button type="button" data-builder-action="audio-preview" title="${attr("CR.Builder.PreviewSound")}"><i class="fa-solid fa-play"></i></button>
@@ -1182,6 +1184,19 @@ function buildFrameSoundMap(state, frames) {
     </article>
   `).join("");
   return `<div class="cr-frame-sound-scroll"><div class="cr-frame-sound-grid" style="grid-template-columns:${columns};grid-template-rows:repeat(${frames.length}, auto)">${frameCards}${trackBars}</div></div>`;
+}
+
+function assignAudioLanes(tracks) {
+  const lanes = new Map();
+  const laneEnds = [];
+  const ordered = [...tracks].sort((left, right) => left.start - right.start || left.end - right.end);
+  for (const track of ordered) {
+    let lane = laneEnds.findIndex((end) => end < track.start);
+    if (lane < 0) lane = laneEnds.length;
+    laneEnds[lane] = track.end;
+    lanes.set(track.id, lane);
+  }
+  return lanes;
 }
 
 function chooseAudioForFrame(state, frameIndex) {
@@ -1294,7 +1309,23 @@ function onAudioResizeMove(state, event) {
   else track.end = Math.max(frameIndex, track.start);
   const bar = state.root.querySelector(`[data-audio-track-id="${CSS.escape(track.id)}"]`);
   if (bar) bar.style.gridRow = `${track.start + 1} / ${track.end + 2}`;
+  updateAudioLaneLayout(state);
   state.dirty = true;
+}
+
+function updateAudioLaneLayout(state) {
+  const tracks = state.project.audioTracks ?? [];
+  const lanes = assignAudioLanes(tracks);
+  const laneCount = lanes.size ? Math.max(...lanes.values()) + 1 : 0;
+  const grid = state.root.querySelector(".cr-frame-sound-grid");
+  if (!grid) return;
+  grid.style.gridTemplateColumns = laneCount
+    ? `minmax(15rem, 1fr) repeat(${laneCount}, minmax(7.5rem, 8.5rem))`
+    : "minmax(15rem, 1fr)";
+  for (const track of tracks) {
+    const element = grid.querySelector(`[data-audio-track-id="${CSS.escape(track.id)}"]`);
+    if (element) element.style.gridColumn = String(lanes.get(track.id) + 2);
+  }
 }
 
 function onAudioResizeEnd(state, event) {
@@ -1709,4 +1740,4 @@ function escapeHtml(value) {
 }
 
 export const projectFileName = PROJECT_FILENAME;
-export { normalizeProject, reorderLayers, simplifyPoints };
+export { assignAudioLanes, normalizeProject, reorderLayers, simplifyPoints };
