@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   advancePresentation,
@@ -18,7 +19,7 @@ import {
   retreatPresentation,
   startPresentation
 } from "../scripts/model.js";
-import { assignAudioLanes, encodeWavSegment, normalizeProject, reorderLayers, simplifyPoints } from "../scripts/comic-builder.js";
+import { assignAudioLanes, encodeWavSegment, localizeGeneratedName, normalizeProject, reorderLayers, simplifyPoints } from "../scripts/comic-builder.js";
 
 const comic = {
   id: "comic-1",
@@ -273,4 +274,51 @@ test("audio segments are encoded as trimmed 16-bit PCM WAV files", () => {
   assert.equal(view.getUint32(40, true), 12);
   assert.equal(view.getInt16(44, true), -16384);
   assert.equal(view.getInt16(46, true), 16383);
+});
+
+test("English and Russian locales are complete and cover every static UI key", () => {
+  const readJson = (path) => JSON.parse(readFileSync(new URL(path, import.meta.url), "utf8"));
+  const english = readJson("../lang/en.json");
+  const russian = readJson("../lang/ru.json");
+  assert.deepEqual(Object.keys(english).sort(), Object.keys(russian).sort());
+  for (const [key, value] of Object.entries(english)) {
+    assert.equal(typeof value, "string", `${key} must be a string in English`);
+    assert.ok(value.trim(), `${key} must not be empty in English`);
+    assert.doesNotMatch(value, /[А-Яа-яЁё]/u, `${key} contains Cyrillic in English`);
+    assert.ok(String(russian[key]).trim(), `${key} must not be empty in Russian`);
+  }
+  const sources = ["../scripts/comic-builder.js", "../scripts/comic-reveal.js"]
+    .map((path) => readFileSync(new URL(path, import.meta.url), "utf8"))
+    .join("\n");
+  const referenced = [...sources.matchAll(/["'](CR\.[A-Za-z0-9_.-]+)["']/g)].map((match) => match[1]);
+  for (const key of referenced) {
+    assert.ok(key in english, `${key} is missing from English locale`);
+    assert.ok(key in russian, `${key} is missing from Russian locale`);
+  }
+});
+
+test("saved automatic page and layer names follow the active locale", () => {
+  const english = JSON.parse(readFileSync(new URL("../lang/en.json", import.meta.url), "utf8"));
+  const russian = JSON.parse(readFileSync(new URL("../lang/ru.json", import.meta.url), "utf8"));
+  const previousGame = globalThis.game;
+  const useLocale = (locale) => {
+    globalThis.game = { i18n: {
+      localize: (key) => locale[key],
+      format: (key, values) => locale[key].replace("{number}", values.number)
+    } };
+  };
+  try {
+    useLocale(english);
+    assert.equal(localizeGeneratedName("Страница 4", "page", 1), "Page 4");
+    assert.equal(localizeGeneratedName("Слой 2", "layer", 1), "Layer 2");
+    assert.equal(localizeGeneratedName("Импортированное состояние 3", "layer", 1), "Imported state 3");
+    assert.equal(localizeGeneratedName("Моя страница", "page", 1), "Моя страница");
+    useLocale(russian);
+    assert.equal(localizeGeneratedName("Page 4", "page", 1), "Страница 4");
+    assert.equal(localizeGeneratedName("Layer 2", "layer", 1), "Слой 2");
+    assert.equal(localizeGeneratedName("New comic", "project"), "Новый комикс");
+  } finally {
+    if (previousGame === undefined) delete globalThis.game;
+    else globalThis.game = previousGame;
+  }
 });

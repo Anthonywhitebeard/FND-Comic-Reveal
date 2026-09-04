@@ -16,7 +16,7 @@ import {
   retreatPresentation,
   startPresentation
 } from "./model.js";
-import { openComicBuilder, projectFileName } from "./comic-builder.js";
+import { localizeGeneratedName, openComicBuilder, projectFileName } from "./comic-builder.js";
 
 const MODULE_ID = "comic-reveal";
 const SOCKET_NAME = `module.${MODULE_ID}`;
@@ -328,7 +328,7 @@ async function scanComicFolder(folder, title, id) {
       if (project?.format === "comic-reveal-project" && Array.isArray(project.outputs)) {
         const pages = project.outputs
           .map((page, index) => ({
-            name: String(page?.name || `Page ${index + 1}`),
+            name: localizeGeneratedName(page?.name, "page", index + 1),
             states: imageFiles(page?.states),
             sounds: Array.isArray(page?.sounds) ? page.sounds.map((sound) => sound || null) : [],
             transitions: Array.isArray(page?.transitions) ? page.transitions : [],
@@ -419,7 +419,7 @@ function projectFromImageSequence(comic) {
       });
       return {
         id: foundry.utils.randomID(),
-        name: page.name || game.i18n.format("CR.Builder.PageName", { number: pageIndex + 1 }),
+        name: localizeGeneratedName(page.name, "page", pageIndex + 1),
         layers,
         timeline: layers.map((layer, stateIndex) => ({
           layerId: layer.id,

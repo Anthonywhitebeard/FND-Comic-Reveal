@@ -1142,7 +1142,7 @@ function normalizeProject(value) {
     format: "comic-reveal-project",
     version: 2,
     projectId: String(value.projectId || makeId("project")),
-    title: String(value.title ?? ""),
+    title: localizeGeneratedName(value.title, "project"),
     outputFolder: String(value.outputFolder ?? ""),
     pages,
     audioTracks
@@ -1661,7 +1661,7 @@ function normalizePage(page, pageIndex) {
   } else {
     const legacyLayer = normalizeLayer({
       id: makeId(`layer-${pageIndex}-0`),
-      name: "Layer 1",
+      name: localizeGeneratedName("", "layer", 1),
       source: page.source,
       regions: page.regions
     }, 0);
@@ -1702,7 +1702,7 @@ function normalizePage(page, pageIndex) {
 
   return {
     id: pageId,
-    name: String(page.name || `Page ${pageIndex + 1}`),
+    name: localizeGeneratedName(page.name, "page", pageIndex + 1),
     layers,
     timeline: validActions,
     audioTracks
@@ -1725,7 +1725,7 @@ function normalizeAudioTrack(track, index, frameCount) {
 function normalizeLayer(layer, layerIndex) {
   return {
     id: String(layer.id || makeId(`layer-${layerIndex}`)),
-    name: String(layer.name || `Layer ${layerIndex + 1}`),
+    name: localizeGeneratedName(layer.name, "layer", layerIndex + 1),
     source: String(layer.source || ""),
     transform: normalizeTransform(layer.transform),
     regions: (Array.isArray(layer.regions) ? layer.regions : []).map((region, regionIndex) => ({
@@ -1753,6 +1753,43 @@ function normalizeTransform(value) {
 
 function normalizeRotation(value) {
   return ((value + 180) % 360 + 360) % 360 - 180;
+}
+
+function localizeGeneratedName(value, type, number = 1) {
+  const original = String(value ?? "").trim();
+  const definitions = {
+    project: {
+      key: "CR.Builder.DefaultTitle",
+      pattern: /^(?:New comic|Новый комикс)$/iu,
+      fallback: "New comic"
+    },
+    page: {
+      key: "CR.Builder.PageName",
+      pattern: /^(?:Page|Страница)\s+(\d+)$/iu,
+      fallback: `Page ${number}`
+    },
+    layer: {
+      key: "CR.Builder.LayerName",
+      pattern: /^(?:Layer|Слой)\s+(\d+)$/iu,
+      fallback: `Layer ${number}`
+    },
+    importedLayer: {
+      key: "CR.Builder.ImportedLayerName",
+      pattern: /^(?:Imported state|Импортированное состояние)\s+(\d+)$/iu,
+      fallback: `Imported state ${number}`
+    }
+  };
+  const definition = definitions[type];
+  if (!definition) return original;
+  if (type === "layer" && definitions.importedLayer.pattern.test(original)) {
+    return localizeGeneratedName(original, "importedLayer", number);
+  }
+  const match = original.match(definition.pattern);
+  if (original && !match) return original;
+  const localizedNumber = match?.[1] ? Number(match[1]) : number;
+  const i18n = globalThis.game?.i18n;
+  if (!i18n) return definition.fallback.replace(String(number), String(localizedNumber));
+  return type === "project" ? i18n.localize(definition.key) : i18n.format(definition.key, { number: localizedNumber });
 }
 
 function regionBounds(points) {
@@ -2002,4 +2039,4 @@ function escapeHtml(value) {
 }
 
 export const projectFileName = PROJECT_FILENAME;
-export { assignAudioLanes, encodeWavSegment, normalizeProject, reorderLayers, simplifyPoints };
+export { assignAudioLanes, encodeWavSegment, localizeGeneratedName, normalizeProject, reorderLayers, simplifyPoints };
