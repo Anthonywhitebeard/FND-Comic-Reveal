@@ -109,6 +109,8 @@ GM controls:
 
 Players cannot advance or dismiss the synchronized presentation. The current state is stored as a world setting so reconnecting clients restore the current comic automatically. Socket messages provide immediate updates while the persistent setting remains authoritative.
 
+Audio tracks can be trimmed directly in the constructor. Click the pencil on a track, drag the selection edges on the waveform, preview the selected range, and save it. The constructor writes a new WAV file into the project's `sounds` folder and applies it to that track without changing the original file.
+
 The Foundry module settings include image fit (`contain` or `cover`), transition duration, sound-effect volume, and an option to insert a black screen between pages.
 
 ## Updating assets

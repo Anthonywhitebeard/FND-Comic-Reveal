@@ -18,7 +18,7 @@ import {
   retreatPresentation,
   startPresentation
 } from "../scripts/model.js";
-import { assignAudioLanes, normalizeProject, reorderLayers, simplifyPoints } from "../scripts/comic-builder.js";
+import { assignAudioLanes, encodeWavSegment, normalizeProject, reorderLayers, simplifyPoints } from "../scripts/comic-builder.js";
 
 const comic = {
   id: "comic-1",
@@ -253,4 +253,24 @@ test("layers can be reordered by drag target identifiers", () => {
   assert.equal(reorderLayers(layers, "text", "base"), true);
   assert.deepEqual(layers.map((layer) => layer.id), ["text", "base", "effects"]);
   assert.equal(reorderLayers(layers, "missing", "base"), false);
+});
+
+test("audio segments are encoded as trimmed 16-bit PCM WAV files", () => {
+  const left = new Float32Array([-1, -0.5, 0, 0.5, 1]);
+  const right = new Float32Array([1, 0.5, 0, -0.5, -1]);
+  const buffer = {
+    sampleRate: 10,
+    numberOfChannels: 2,
+    length: 5,
+    getChannelData: (channel) => channel === 0 ? left : right
+  };
+  const wav = encodeWavSegment(buffer, 0.1, 0.4);
+  const view = new DataView(wav);
+  assert.equal(new TextDecoder().decode(new Uint8Array(wav, 0, 4)), "RIFF");
+  assert.equal(new TextDecoder().decode(new Uint8Array(wav, 8, 4)), "WAVE");
+  assert.equal(view.getUint16(22, true), 2);
+  assert.equal(view.getUint32(24, true), 10);
+  assert.equal(view.getUint32(40, true), 12);
+  assert.equal(view.getInt16(44, true), -16384);
+  assert.equal(view.getInt16(46, true), 16383);
 });

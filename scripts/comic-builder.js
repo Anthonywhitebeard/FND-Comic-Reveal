@@ -50,6 +50,8 @@ function createBuilderState(onExport) {
     transformDrag: null,
     previewAnimation: null,
     audioResize: null,
+    audioEditor: null,
+    audioEditorLoading: false,
     onExport
   };
 }
@@ -237,7 +239,18 @@ async function onBuilderClick(state, event) {
     if (action === "sound-clear") return clearRegionSound(state, regionIndex);
     if (action === "add-audio-at-frame") return chooseAudioForFrame(state, Number(button.dataset.audioFrameIndex));
     if (action === "audio-preview") return previewAudioTrack(state, button.closest("[data-audio-track-id]")?.dataset.audioTrackId);
+    if (action === "audio-edit") {
+      await openAudioEditor(state, button.closest("[data-audio-track-id]")?.dataset.audioTrackId);
+      return;
+    }
     if (action === "audio-delete") return deleteAudioTrack(state, button.closest("[data-audio-track-id]")?.dataset.audioTrackId);
+    if (action === "audio-editor-close") return closeAudioEditor(state);
+    if (action === "audio-editor-preview") return previewAudioSelection(state);
+    if (action === "audio-editor-stop") return stopAudioSelection(state);
+    if (action === "audio-editor-save") {
+      await saveAudioSelection(state);
+      return;
+    }
   } catch (error) {
     console.error(`${MODULE_ID} | Builder`, error);
     ui.notifications.error(error?.message || game.i18n.localize("CR.Errors.Unknown"));
@@ -1179,6 +1192,7 @@ function buildFrameSoundMap(state, frames) {
       <button type="button" class="cr-audio-resize" data-audio-resize="start" title="${attr("CR.Builder.ResizeSoundStart")}"></button>
       <div class="cr-audio-track-name"><strong>${escapeHtml(fileName(track.source))}</strong><small>${formatAudioDuration(track.duration)}</small></div>
       <button type="button" data-builder-action="audio-preview" title="${attr("CR.Builder.PreviewSound")}"><i class="fa-solid fa-play"></i></button>
+      <button type="button" data-builder-action="audio-edit" title="${attr("CR.Builder.EditSound")}"><i class="fa-solid fa-pen"></i></button>
       <button type="button" data-builder-action="audio-delete" title="${attr("CR.Builder.ClearSound")}"><i class="fa-solid fa-trash"></i></button>
       <button type="button" class="cr-audio-resize" data-audio-resize="end" title="${attr("CR.Builder.ResizeSoundEnd")}"></button>
     </article>
@@ -1236,6 +1250,246 @@ function deleteAudioTrack(state, trackId) {
   state.project.audioTracks = state.project.audioTracks.filter((entry) => entry.id !== trackId);
   state.dirty = true;
   refreshBuilder(state);
+}
+
+async function openAudioEditor(state, trackId) {
+  const track = state.project.audioTracks?.find((entry) => entry.id === trackId);
+  if (!track?.source || state.audioEditor || state.audioEditorLoading) return;
+  state.audioEditorLoading = true;
+  setStatus(state, game.i18n.localize("CR.Builder.AudioEditorLoading"));
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) {
+    state.audioEditorLoading = false;
+    throw new Error(game.i18n.localize("CR.Builder.AudioEditorUnsupported"));
+  }
+  let context;
+  try {
+    context = new AudioContextClass();
+    const response = await fetch(withCacheBuster(track.source));
+    if (!response.ok) throw new Error(game.i18n.localize("CR.Builder.AudioEditorLoadFailed"));
+    const buffer = await context.decodeAudioData(await response.arrayBuffer());
+    const modal = document.createElement("section");
+    modal.className = "cr-audio-editor-backdrop";
+    modal.innerHTML = `
+      <div class="cr-audio-editor" role="dialog" aria-modal="true" aria-label="${attr("CR.Builder.AudioEditorTitle")}">
+        <header><strong><i class="fa-solid fa-scissors"></i> ${text("CR.Builder.AudioEditorTitle")}</strong><button type="button" data-builder-action="audio-editor-close" title="${attr("CR.Common.Close")}"><i class="fa-solid fa-xmark"></i></button></header>
+        <p class="cr-audio-editor-file">${escapeHtml(fileName(track.source))} · ${formatAudioDuration(buffer.duration)}</p>
+        <p class="cr-audio-editor-hint">${text("CR.Builder.AudioEditorHint")}</p>
+        <canvas class="cr-audio-waveform" width="900" height="220" data-audio-waveform></canvas>
+        <div class="cr-audio-editor-times">
+          <label>${text("CR.Builder.AudioEditorStart")} <input type="number" min="0" step="0.01" data-audio-time="start"></label>
+          <output data-audio-selection-duration></output>
+          <label>${text("CR.Builder.AudioEditorEnd")} <input type="number" min="0" step="0.01" data-audio-time="end"></label>
+        </div>
+        <footer>
+          <button type="button" data-builder-action="audio-editor-preview"><i class="fa-solid fa-play"></i> ${text("CR.Builder.AudioEditorPreview")}</button>
+          <button type="button" data-builder-action="audio-editor-stop"><i class="fa-solid fa-stop"></i> ${text("CR.Builder.AudioEditorStop")}</button>
+          <span></span>
+          <button type="button" data-builder-action="audio-editor-close">${text("CR.Builder.Cancel")}</button>
+          <button type="button" class="cr-primary" data-builder-action="audio-editor-save"><i class="fa-solid fa-floppy-disk"></i> ${text("CR.Builder.AudioEditorSave")}</button>
+        </footer>
+      </div>`;
+    state.audioEditor = { trackId, track, context, buffer, start: 0, end: buffer.duration, modal, preview: null, dragEdge: null, saving: false };
+    state.root.appendChild(modal);
+    bindAudioEditor(state);
+    updateAudioEditor(state);
+    setStatus(state, game.i18n.localize("CR.Builder.Ready"));
+  } catch (error) {
+    await context?.close().catch(() => {});
+    throw error;
+  } finally {
+    state.audioEditorLoading = false;
+  }
+}
+
+function bindAudioEditor(state) {
+  const editor = state.audioEditor;
+  const canvas = editor?.modal.querySelector("[data-audio-waveform]");
+  if (!editor || !canvas) return;
+  canvas.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0) return;
+    const time = waveformTime(canvas, event, editor.buffer.duration);
+    editor.dragEdge = Math.abs(time - editor.start) <= Math.abs(time - editor.end) ? "start" : "end";
+    canvas.setPointerCapture?.(event.pointerId);
+    setAudioSelectionEdge(state, editor.dragEdge, time);
+  });
+  canvas.addEventListener("pointermove", (event) => {
+    if (!editor.dragEdge || !canvas.hasPointerCapture?.(event.pointerId)) return;
+    setAudioSelectionEdge(state, editor.dragEdge, waveformTime(canvas, event, editor.buffer.duration));
+  });
+  const release = (event) => {
+    if (canvas.hasPointerCapture?.(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+    editor.dragEdge = null;
+  };
+  canvas.addEventListener("pointerup", release);
+  canvas.addEventListener("pointercancel", release);
+  for (const input of editor.modal.querySelectorAll("[data-audio-time]")) {
+    input.addEventListener("change", () => setAudioSelectionEdge(state, input.dataset.audioTime, Number(input.value)));
+  }
+}
+
+function waveformTime(canvas, event, duration) {
+  const rect = canvas.getBoundingClientRect();
+  return clamp((event.clientX - rect.left) / rect.width, 0, 1) * duration;
+}
+
+function setAudioSelectionEdge(state, edge, value) {
+  const editor = state.audioEditor;
+  if (!editor || !Number.isFinite(value)) return;
+  const minimum = Math.min(0.05, editor.buffer.duration);
+  if (edge === "start") editor.start = clamp(value, 0, Math.max(0, editor.end - minimum));
+  else editor.end = clamp(value, Math.min(editor.buffer.duration, editor.start + minimum), editor.buffer.duration);
+  stopAudioSelection(state);
+  updateAudioEditor(state);
+}
+
+function updateAudioEditor(state) {
+  const editor = state.audioEditor;
+  if (!editor) return;
+  const startInput = editor.modal.querySelector('[data-audio-time="start"]');
+  const endInput = editor.modal.querySelector('[data-audio-time="end"]');
+  startInput.max = Math.max(0, editor.end - 0.01).toFixed(2);
+  startInput.value = editor.start.toFixed(2);
+  endInput.min = Math.min(editor.buffer.duration, editor.start + 0.01).toFixed(2);
+  endInput.max = editor.buffer.duration.toFixed(2);
+  endInput.value = editor.end.toFixed(2);
+  editor.modal.querySelector("[data-audio-selection-duration]").textContent = game.i18n.format("CR.Builder.AudioEditorSelection", { duration: (editor.end - editor.start).toFixed(2) });
+  drawAudioWaveform(editor);
+}
+
+function drawAudioWaveform(editor) {
+  const canvas = editor.modal.querySelector("[data-audio-waveform]");
+  const context = canvas.getContext("2d");
+  const { width, height } = canvas;
+  context.clearRect(0, 0, width, height);
+  context.fillStyle = "#11151e";
+  context.fillRect(0, 0, width, height);
+  const samples = editor.buffer.getChannelData(0);
+  const stride = Math.max(1, Math.floor(samples.length / width));
+  context.strokeStyle = "#73d7a0";
+  context.lineWidth = 1;
+  context.beginPath();
+  for (let x = 0; x < width; x += 1) {
+    let minimum = 1;
+    let maximum = -1;
+    const begin = x * stride;
+    const finish = Math.min(samples.length, begin + stride);
+    for (let index = begin; index < finish; index += 1) {
+      minimum = Math.min(minimum, samples[index]);
+      maximum = Math.max(maximum, samples[index]);
+    }
+    context.moveTo(x + 0.5, (1 + minimum) * height / 2);
+    context.lineTo(x + 0.5, (1 + maximum) * height / 2);
+  }
+  context.stroke();
+  const startX = editor.start / editor.buffer.duration * width;
+  const endX = editor.end / editor.buffer.duration * width;
+  context.fillStyle = "rgb(0 0 0 / 62%)";
+  context.fillRect(0, 0, startX, height);
+  context.fillRect(endX, 0, width - endX, height);
+  context.fillStyle = "#ffcf56";
+  context.fillRect(startX - 2, 0, 4, height);
+  context.fillRect(endX - 2, 0, 4, height);
+}
+
+async function previewAudioSelection(state) {
+  const editor = state.audioEditor;
+  if (!editor) return;
+  stopAudioSelection(state);
+  await editor.context.resume();
+  const source = editor.context.createBufferSource();
+  const gain = editor.context.createGain();
+  gain.gain.value = Number(game.settings.get(MODULE_ID, "effectVolume"));
+  source.buffer = editor.buffer;
+  source.connect(gain).connect(editor.context.destination);
+  source.addEventListener("ended", () => {
+    if (editor.preview === source) editor.preview = null;
+  }, { once: true });
+  editor.preview = source;
+  source.start(0, editor.start, editor.end - editor.start);
+}
+
+function stopAudioSelection(state) {
+  const editor = state.audioEditor;
+  if (!editor?.preview) return;
+  try { editor.preview.stop(); } catch {}
+  editor.preview = null;
+}
+
+async function saveAudioSelection(state) {
+  const editor = state.audioEditor;
+  if (!editor || editor.saving) return;
+  syncHeaderFields(state);
+  if (!state.project.outputFolder) throw new Error(game.i18n.localize("CR.Builder.OutputRequiredForAudio"));
+  editor.saving = true;
+  editor.modal.classList.add("is-saving");
+  setStatus(state, game.i18n.localize("CR.Builder.AudioEditorSaving"));
+  try {
+    const folder = `${state.project.outputFolder}/sounds`;
+    await ensureDirectoryTree(folder);
+    const baseName = fileName(editor.track.source).replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "sound";
+    const filename = `${baseName}-trim-${foundry.utils.randomID().slice(0, 6).toLowerCase()}.wav`;
+    const wav = encodeWavSegment(editor.buffer, editor.start, editor.end);
+    const path = await uploadFile(folder, new File([wav], filename, { type: "audio/wav" }));
+    editor.track.source = path;
+    editor.track.duration = editor.end - editor.start;
+    state.dirty = true;
+    editor.saving = false;
+    await closeAudioEditor(state);
+    refreshBuilder(state);
+    setStatus(state, game.i18n.localize("CR.Builder.AudioEditorSaved"));
+  } catch (error) {
+    editor.saving = false;
+    editor.modal.classList.remove("is-saving");
+    throw error;
+  }
+}
+
+async function closeAudioEditor(state) {
+  const editor = state.audioEditor;
+  if (!editor || editor.saving) return;
+  stopAudioSelection(state);
+  editor.modal.remove();
+  state.audioEditor = null;
+  await editor.context.close().catch(() => {});
+}
+
+function encodeWavSegment(buffer, startSeconds, endSeconds) {
+  const sampleRate = buffer.sampleRate;
+  const channels = buffer.numberOfChannels;
+  const start = clamp(Math.floor(startSeconds * sampleRate), 0, buffer.length);
+  const end = clamp(Math.ceil(endSeconds * sampleRate), start, buffer.length);
+  const frames = end - start;
+  const bytesPerSample = 2;
+  const dataSize = frames * channels * bytesPerSample;
+  const output = new ArrayBuffer(44 + dataSize);
+  const view = new DataView(output);
+  const writeString = (offset, value) => {
+    for (let index = 0; index < value.length; index += 1) view.setUint8(offset + index, value.charCodeAt(index));
+  };
+  writeString(0, "RIFF");
+  view.setUint32(4, 36 + dataSize, true);
+  writeString(8, "WAVE");
+  writeString(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, channels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * channels * bytesPerSample, true);
+  view.setUint16(32, channels * bytesPerSample, true);
+  view.setUint16(34, 16, true);
+  writeString(36, "data");
+  view.setUint32(40, dataSize, true);
+  const channelData = Array.from({ length: channels }, (_, channel) => buffer.getChannelData(channel));
+  let offset = 44;
+  for (let frame = start; frame < end; frame += 1) {
+    for (let channel = 0; channel < channels; channel += 1) {
+      const sample = clamp(channelData[channel][frame], -1, 1);
+      view.setInt16(offset, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true);
+      offset += bytesPerSample;
+    }
+  }
+  return output;
 }
 
 function onAudioDragOver(state, event) {
@@ -1561,6 +1815,11 @@ function canvasBlob(canvas, type, quality) {
 
 function closeBuilder(state) {
   if (state.dirty && !window.confirm(game.i18n.localize("CR.Builder.CloseConfirm"))) return;
+  if (state.audioEditor) {
+    stopAudioSelection(state);
+    state.audioEditor.context.close().catch(() => {});
+    state.audioEditor = null;
+  }
   document.removeEventListener("keydown", onBuilderKeydown, true);
   window.removeEventListener("paste", onBuilderPaste, true);
   document.body.classList.remove("comic-reveal-builder-open");
@@ -1648,7 +1907,10 @@ async function convertClipboardImageToWebp(file) {
 function onBuilderKeydown(event) {
   const state = builder;
   if (!state?.root?.isConnected) return;
-  if (event.key === "Enter" && state.tool === "polygon" && state.draft.length >= 3) {
+  if (event.key === "Escape" && state.audioEditor) {
+    event.preventDefault();
+    closeAudioEditor(state);
+  } else if (event.key === "Enter" && state.tool === "polygon" && state.draft.length >= 3) {
     event.preventDefault();
     finishDraft(state);
   } else if (event.key === "Escape" && state.draft.length) {
@@ -1740,4 +2002,4 @@ function escapeHtml(value) {
 }
 
 export const projectFileName = PROJECT_FILENAME;
-export { assignAudioLanes, normalizeProject, reorderLayers, simplifyPoints };
+export { assignAudioLanes, encodeWavSegment, normalizeProject, reorderLayers, simplifyPoints };
