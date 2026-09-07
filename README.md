@@ -28,7 +28,7 @@ Open the Comic Reveal library and click **Create comic from images**.
 2. Click **Add empty page**. Paste its image with `Ctrl+V`, or select the empty layer and click **Choose layer image**.
 3. Outline each reveal area in playback order.
 4. Add and arrange more pages when needed.
-5. Use the preview controls to inspect every state, including the initial black state.
+5. Use the preview controls to inspect every state, including the initial black state. Click **Back to edit** to leave the cumulative preview and return to the selected layer, its outlines, and drawing tools.
 6. Click **Build comic**.
 
 Use **Move layer** to position the selected image by dragging it. The mouse wheel changes its size; `Shift` + wheel rotates it. The adjacent buttons provide repeatable 10% scale and 5° rotation steps, plus a full transform reset. These operations are non-destructive and are saved in the project.

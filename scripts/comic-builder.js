@@ -98,7 +98,7 @@ function createBuilderElement() {
             <button type="button" data-builder-action="reset-transform" title="${attr("CR.Builder.ResetTransform")}"><i class="fa-solid fa-arrows-rotate"></i></button>
           </div>
           <div class="cr-tool-group">
-            <button type="button" data-builder-action="preview-edit"><i class="fa-solid fa-pen"></i> ${text("CR.Builder.EditMode")}</button>
+            <button type="button" data-builder-action="preview-edit" title="${attr("CR.Builder.EditModeHint")}"><i class="fa-solid fa-pen"></i> ${text("CR.Builder.EditMode")}</button>
             <button type="button" data-builder-action="preview-previous"><i class="fa-solid fa-backward-step"></i></button>
             <span data-builder-preview-label></span>
             <button type="button" data-builder-action="preview-next"><i class="fa-solid fa-forward-step"></i></button>
@@ -828,8 +828,8 @@ function refreshBuilder(state) {
   for (const button of state.root.querySelectorAll("[data-builder-action='tool']")) {
     button.classList.toggle("is-active", button.dataset.tool === state.tool && state.previewStep === null);
   }
-  state.root.querySelector("[data-builder-action='finish-polygon']").disabled = state.tool !== "polygon" || state.draft.length < 3;
-  state.root.querySelector("[data-builder-action='cancel-draft']").disabled = !state.draft.length;
+  updateDraftControls(state);
+  state.root.querySelector("[data-builder-action='preview-edit']").disabled = state.previewStep === null;
   state.root.querySelector("[data-builder-preview-label]").textContent = state.previewStep === null
     ? game.i18n.localize("CR.Builder.Editing")
     : game.i18n.format("CR.Builder.PreviewState", { current: state.previewStep + 1, total: page?.timeline.length ?? 0 });
@@ -845,6 +845,7 @@ function resolveAction(page, action) {
 
 function renderCanvas(state) {
   cancelPreviewAnimation(state);
+  updateDraftControls(state);
   const canvas = state.root?.querySelector("[data-builder-canvas]");
   const page = activePage(state);
   if (!canvas || !page || !state.baseImage) return;
@@ -864,6 +865,13 @@ function renderCanvas(state) {
     strokeRegion(context, region.points, canvas.width, canvas.height, COLORS[Math.max(0, index) % COLORS.length], index + 1);
   }
   if (state.draft.length) strokeRegion(context, state.draft, canvas.width, canvas.height, "#ffffff", "+", false);
+}
+
+function updateDraftControls(state) {
+  const finish = state.root?.querySelector("[data-builder-action='finish-polygon']");
+  const cancel = state.root?.querySelector("[data-builder-action='cancel-draft']");
+  if (finish) finish.disabled = state.tool !== "polygon" || state.draft.length < 3;
+  if (cancel) cancel.disabled = !state.draft.length;
 }
 
 function drawTimelineState(context, state, page, endIndex, width, height) {
